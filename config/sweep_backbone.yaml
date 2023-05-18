@@ -1,0 +1,19 @@
+method: grid
+name: atp
+metric:
+  goal: maximize
+  name: best_dev_metric_f
+parameters:
+  n_sample:
+    value: 0
+  seed:
+    values:
+    - 42
+    - 1314
+    - 3407
+  dropout:
+    values:
+    - 0.1
+    - 0.3
+    - 0.5
+  

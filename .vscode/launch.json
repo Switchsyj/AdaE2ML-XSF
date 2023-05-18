@@ -1,0 +1,65 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": true,
+            "args": [
+                // "--cuda", "7",
+                // "--weight_decay", "1e-4",
+                // "--cl",
+                // "--cl_type", "cosine",
+                // "--cl_temperature", "0.5",
+                // "-lr", "1e-3",
+                // "--emb_dim", "768",
+                // // "--emb_dim", "300",
+                // "--epoch", "1",
+                // "--dropout", "0.3",
+                // "--hidden_size", "150",
+                // "--emb_file", "data/snips/cache/slu+slot_word_char.npy",
+                // "--slot_emb_file", "data/snips/cache/slot_word_char.pkl",
+                // "--n_sample", "0",
+                // "--tgt_dm", "BookRestaurant",
+                // // "--model_ckpt", "ckpt/debug_vocab.ckpt",
+                // // "--vocab_ckpt", "ckpt/debug_vocab.ckpt",
+                // // inference
+                // "--model_ckpt", "ckpt/end2end_cl/bert_domain_br0.ckpt",
+                // "--vocab_ckpt", "ckpt/vocab/bert_domain_cl_br0_vocab.ckpt",
+                
+                //coach
+                // "--cuda", "2",
+                // // pclc
+                // "--batch_size", "32",
+                // "--weight_decay", "1e-4",
+                // "-lr", "5e-4",
+                // // "--emb_dim", "400",
+                // "--emb_dim", "768",
+                // "--epoch", "1",
+                // "--dropout", "0.3",
+                // // "--hidden_size", "200",
+                // "--hidden_size", "200",
+                // "--num_rnn_layer", "1",
+                // // "--emb_file", "data/snips/cache/slu+slot_word_char.npy",
+                // // "--slot_emb_file", "data/snips/cache/slot_word_char.dict",
+                // "--n_sample", "0",
+                // "--tgt_dm", "SearchScreeningEvent",
+                // "--model_ckpt", "ckpt/debug.ckpt",
+                // "--vocab_ckpt", "ckpt/debug_vocab.ckpt",
+                // "--freeze_emb",
+                // "--tr",
+                
+                // SF dataset
+                "--dataset_name", "train_qa_inst.parquet",
+                "--split", "train",
+                "--num_workers", "4",
+            ]
+        }
+    ]
+}

@@ -1,0 +1,16 @@
+{
+    "title_data": {
+       "train": "./data/joint_train_unlabel2w.txt",
+       "dev": "./data/joint_val.txt",
+       "test": "./data/joint_val.txt"
+     },
+    "conll": {
+       "train": "./conll03/conll.train",
+       "dev": "./conll03/conll.dev",
+       "test": "./conll03/conll.test"
+     },
+     "pretrained": {
+       "char_embedding": "./embeddings/giga.100.txt",
+       "bert_model": "./bert/final_rbt_wwm_pre_all"
+     }
+   }
