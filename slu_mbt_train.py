@@ -469,7 +469,7 @@ if __name__ == '__main__':
     else:
         args.device = torch.device('cpu')
     
-    random_seed = [1314, 3407, 2019, 2020, 2021, 2022, 2023]
+    random_seed = [1314, 1315, 1316, 1317, 1318]
     final_res = {'p': [], 'r': [], 'f': []}
     for seed in random_seed:
         set_seeds(seed)
@@ -480,7 +480,7 @@ if __name__ == '__main__':
         final_res['p'].append(prf['slu_p'])
         final_res['r'].append(prf['slu_r'])
         final_res['f'].append(prf['slu_f'])
-        break
+        # break
     final_res['p'] = np.array(final_res['p'])
     final_res['r'] = np.array(final_res['r'])
     final_res['f'] = np.array(final_res['f'])

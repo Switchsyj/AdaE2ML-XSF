@@ -183,7 +183,7 @@ def load_tf_weights_in_bert(model, config, tf_checkpoint_path):
 class BertEmbeddings(nn.Module):
     """Construct the embeddings from word, position and token_type embeddings."""
 
-    def __init__(self, config):
+    def __init__(self, config, use_label_pos_embedding: bool=True):
         super().__init__()
         self.word_embeddings = nn.Embedding(config.vocab_size, config.hidden_size, padding_idx=config.pad_token_id)
         self.position_embeddings = nn.Embedding(config.max_position_embeddings, config.hidden_size)
@@ -199,6 +199,7 @@ class BertEmbeddings(nn.Module):
         self.register_buffer(
             "token_type_ids", torch.zeros(self.position_ids.size(), dtype=torch.long), persistent=False
         )
+        self.use_label_pos_embedding = use_label_pos_embedding
 
     def forward(
         self,
@@ -208,7 +209,6 @@ class BertEmbeddings(nn.Module):
         inputs_embeds: Optional[torch.FloatTensor] = None,
         past_key_values_length: int = 0,
         modality: str = 'utterance',
-        bottleneck_length: int = 4,
     ) -> torch.Tensor:
         if input_ids is not None:
             input_shape = input_ids.size()
@@ -218,8 +218,8 @@ class BertEmbeddings(nn.Module):
         bsz, seq_length = input_shape[0], input_shape[1]
 
         if position_ids is None:
-            if modality == 'utterance':
-                position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length - bottleneck_length]
+            # if modality == 'utterance':
+            position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length]
 
         # Setting the token_type_ids to the registered buffer in constructor where it is all zeros, which usually occurs
         # when its auto-generated, registered buffer helps users when tracing the model without passing token_type_ids, solves
@@ -239,9 +239,14 @@ class BertEmbeddings(nn.Module):
         embeddings = inputs_embeds + token_type_embeddings
         if self.position_embedding_type == "absolute":
             if modality == 'utterance':
-                position_embeddings = torch.cat([torch.zeros((bsz, bottleneck_length, inputs_embeds.size(-1)), device=input_ids.device), self.position_embeddings(position_ids).expand(bsz, position_ids.size(1), -1)], dim=1)
+                # position_embeddings = torch.cat([self.position_embeddings(position_ids).expand(bsz, position_ids.size(1), -1), torch.zeros((bsz, self.num_bottleneck, inputs_embeds.size(-1)), device=input_ids.device)], dim=1)
+                position_embeddings = self.position_embeddings(position_ids).expand(bsz, position_ids.size(1), -1).contiguous()
             elif modality == 'label':
-                position_embeddings = torch.zeros((bsz, seq_length + past_key_values_length, inputs_embeds.size(-1)), device=inputs_embeds.device)
+                if self.use_label_pos_embedding:
+                # position_embeddings = torch.zeros((bsz, seq_length + past_key_values_length, inputs_embeds.size(-1)), device=inputs_embeds.device)
+                    position_embeddings = self.position_embeddings(position_ids).expand(bsz, position_ids.size(1), -1).contiguous()
+                else:
+                    position_embeddings = torch.zeros((bsz, seq_length + past_key_values_length, inputs_embeds.size(-1)), device=inputs_embeds.device)
             else:
                 raise NotImplementedError
             embeddings += position_embeddings
@@ -617,14 +622,14 @@ class BertEncoder(nn.Module):
                     hidden_states[modality] = layer_modality_outputs[modality][0]
                 else:           
                     layer_modality_outputs[modality] = layer_module(
-                        torch.cat([bottleneck, hidden_states[modality]], dim=1),
-                        torch.cat([torch.ones(bsz, bottleneck.size(1), 
+                        torch.cat([hidden_states[modality], bottleneck], dim=1),
+                        torch.cat([attention_mask[modality], 
+                                   torch.ones(bsz, bottleneck.size(1), 
                                             dtype=attention_mask[modality].dtype, 
-                                            device=attention_mask[modality].device)[:, None, None, :], 
-                                attention_mask[modality]], dim=-1),
+                                            device=attention_mask[modality].device)[:, None, None, :]], dim=-1),
                     )
-                    hidden_states[modality] = layer_modality_outputs[modality][0][:, bottleneck.size(1):]
-                    bottleneck_lst.append(layer_modality_outputs[modality][0][:, :bottleneck.size(1)])
+                    hidden_states[modality] = layer_modality_outputs[modality][0][:, :-bottleneck.size(1)]
+                    bottleneck_lst.append(layer_modality_outputs[modality][0][:, -bottleneck.size(1):])
             
             # update bottleneck with different modalities.
             if len(bottleneck_lst) > 0:        
@@ -905,8 +910,8 @@ class BertModel(BertPreTrainedModel):
         super().__init__(config)
         self.config = config
 
-        self.embeddings = BertEmbeddings(config)
-        self.encoder = BertEncoder(config, num_bottleneck=4, bottleneck_layers=[8, 9, 10, 11])
+        self.embeddings = BertEmbeddings(config, use_label_pos_embedding=False)
+        self.encoder = BertEncoder(config, num_bottleneck=4, bottleneck_layers=[0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11])
 
         self.pooler = BertPooler(config) if add_pooling_layer else None
 
