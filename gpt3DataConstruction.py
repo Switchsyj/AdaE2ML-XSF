@@ -3,7 +3,7 @@ import openai as ai
 import random
 import json
 import jsonlines
-# ai.api_key = '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'
+ai.api_key = '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'
 # API_KEY=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
 
 domain2slot = {
@@ -30,9 +30,9 @@ def generate_gpt3_response(user_text, print_output=False):
     """
     completions = ai.Completion.create(
         engine='text-davinci-003',  # Determines the quality, speed, and cost.
-        temperature=0.8,            # Level of creativity in the response
+        temperature=0.6,            # Level of creativity in the response
         prompt=user_text,           # What the user typed in
-        max_tokens=512,             # Maximum tokens in the prompt AND response
+        max_tokens=1024,             # Maximum tokens in the prompt AND response
         n=1,                        # The number of completions to generate
         stop=None,                  # An optional setting to control response generation
     )
@@ -54,13 +54,13 @@ if __name__ == '__main__':
                      "comparing": ['product_name', 'category', 'price', 'color', 'material', 'sort'],
                      "payment & refund & reorder": ['inquiry_type', 'product_name', 'payment_type', 'price', 'timeRange', 'order_number'],
                      "customer service": ['inquiry_type', 'payment_type', 'product_name', 'order_number'],
-                     "delivery": ['product_name', 'timeRange', 'country', 'city', 'state'],
-                     "discount": ['product_name', 'price']}
+                     "delivery": ['product_name', 'timeRange', 'country', 'city', 'state']}
+                    #  "discount": ['product_name', 'price']}
     
     data_aug = []
     for i in range(100):
         # slot_label_choice = random.sample(generate_slot_list, 2) + random.sample(unseen_list, 2)
-        scene = random.sample(["searching", "ordering", "comparing", "payment & refund & reorder", "customer service", "delivery", "discount"], 1)[0]
+        scene = random.sample(["searching", "ordering", "comparing", "payment & refund & reorder", "customer service", "delivery"], 1)[0]
         slot_label_choice = random.sample(senario_2slot[scene], min(len(senario_2slot[scene]), 4))
         print("============")
         print(slot_label_choice)
@@ -69,19 +69,20 @@ if __name__ == '__main__':
         print("============")
         # usr_prompt = f"I want to generate one slot-filling data 'from e-commerce website' under '{scene}' scene. you can choose one or several labels from below: '{slot_label_choice[0]}, {slot_label_choice[1]}, {slot_label_choice[2]}, {slot_label_choice[3]}'. You should return natural language utterance and slots in 'json' format and garantee it is true."
         if len(senario_2slot[scene]) < 4:
-            usr_prompt = f"Suppose you are talking to an e-commercial assistant asking for '{scene}'. you can choose one or several labels from below: '{slot_label_choice[0]}, {slot_label_choice[1]}'. You should return natural language utterance and slots in 'json' format and garantee it is true under this dialogue conversation."
+            usr_prompt = f"Give me an examples with `imperative` instructions. Suppose you are talking to an e-commercial assistant asking for '{scene}'. You can choose several labels from below: '{slot_label_choice[0]}, {slot_label_choice[1]}'. You should generate instructive natural language utterance and slots using the chosen labels. You should return 'json' format data and garantee it is true under this dialogue conversation."
         else:
-            usr_prompt = f"Suppose you are talking to an e-commercial assistant asking for '{scene}'. you can choose one or several labels from below: '{slot_label_choice[0]}, {slot_label_choice[1]}, {slot_label_choice[2]}, {slot_label_choice[3]}'. You should return natural language utterance and slots in 'json' format and garantee it is true under this dialogue conversation."
-        usr_prompt += 'Example: {"scene": "payment & refund & reorder", "utterance": "Please help me order a 128GB red iphone-14 on Saturday.", "slots": [{"slot_name": "time_range", "slot_value": "Saturday"}, {"slot_name": "product_name", "slot_value": "iphone-14"}]}, {"scene": "searching", "utterance": "I want to buy a laptop, please help me search with price lower than 99 dollars.", "slots": [{"slot_name": "price", "slot_value": "99 dollars"}, {"slot_name": "category", "slot_value": "laptop"}]}, {"scene": "comparing", "utterance": "Compare two laptops Dell XPS 13 and Macbook Air in price and performance ratio.", "slots": [{"slot_name": "product_name", "slot_value": "Dell XPS 13"}, {"slot_name": "product_name", "slot_value": "Macbook Air"}, {"slot_name": "category", "slot_value": "laptop"}, {"slot_name": "sort", "slot_value": "price and performance ratio"}]}'
+            usr_prompt = f"Give me an examples with `imperative` instructions. Suppose you are talking to an e-commercial assistant asking for '{scene}'. You can choose several labels from below: '{slot_label_choice[0]}, {slot_label_choice[1]}, {slot_label_choice[2]}, {slot_label_choice[3]}'. You should generate instructive natural language utterance and slots using the chosen labels. You should return 'json' format data and garantee it is true under this dialogue conversation."
+        usr_prompt += '{"scene": "delivery", "utterance": "Please deliver my order to city Los Angeles in state California, country U.S.A .", "slots": [{"slot_name": "city", "slot_value": "Los Angeles"}, {"slot_name": "state", "slot_value": "California"}, {"slot_name": "country", "slot_value": "U.S.A"}]}, {"scene": "searching", {"scene": "payment & refund & reorder", "utterance": "Pay for a 256GB black iphone-14 using my Visa card.", "slots": [{"slot_name": "product_name", "slot_value": "iphone-14"}, {"slot_name": "material", "slot_value": "black"}, {"slot_name": "size", "slot_value": "256GB"}, {"slot_name": "payment_type", "slot_value": "Visa card"}]}, {"scene": "refund & reorder", "utterance": "Refund my order with order number 7890 and reorder the same product.", "slots": [{"slot_name": "order_number", "slot_value": "7890"}, {"slot_name": "inquiry_type", "slot_value": "refund & reorder"}]}\n generate data: '
+
         print(usr_prompt)
-        # gen_text = generate_gpt3_response(usr_prompt, print_output=True)
-        # data_aug.append(gen_text)
-    # data_count = 0
-    # with jsonlines.open('data/constsf/ecommerce.json', 'w') as f:
-    #     for data in data_aug:
-    #         try:
-    #             f.write(json.loads(data))
-    #             data_count += 1
-    #         except:
-    #             print(data)
-    # print(f"======write {data_count} lines ======")
+        gen_text = generate_gpt3_response(usr_prompt, print_output=True)
+        data_aug.append(gen_text)
+    data_count = 0
+    with jsonlines.open('data/constsf/ecommerce_0002.json', 'a') as f:
+        for data in data_aug:
+            try:
+                f.write(json.loads(data))
+                data_count += 1
+            except:
+                print(data)
+    print(f"======write {data_count} lines ======")

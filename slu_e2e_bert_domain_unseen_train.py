@@ -87,6 +87,23 @@ class Trainer(object):
         # self.weighted_loss = UW(task_name=['main_loss', 'orth_loss', 'cl_loss'], device=self.args.device)
         
         no_decay = ['bias', 'LayerNorm.weight']
+        # optimizer_parameters = [
+        #     {'params': [p for n, p in self.slu_model.bert_named_params()
+        #                 if not any(nd in n for nd in no_decay) and p.requires_grad],
+        #      'weight_decay': 1e-2, 'lr': self.args.bert_lr},
+        #     {'params': [p for n, p in self.slu_model.bert_named_params()
+        #                 if any(nd in n for nd in no_decay) and p.requires_grad],
+        #      'weight_decay': 0.0, 'lr': self.args.bert_lr},
+            
+        #     {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay)],
+        #      'weight_decay': 1e-4, 'lr': self.args.lr},
+        #     {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay)],
+        #      'weight_decay': 0.0, 'lr': self.args.lr},
+            
+        # ]
+        
+        # TODO: VAE param
+        labelspace_param = ['hidden2mean', 'hidden2logv', 'latent2hidden']
         optimizer_parameters = [
             {'params': [p for n, p in self.slu_model.bert_named_params()
                         if not any(nd in n for nd in no_decay) and p.requires_grad],
@@ -95,13 +112,16 @@ class Trainer(object):
                         if any(nd in n for nd in no_decay) and p.requires_grad],
              'weight_decay': 0.0, 'lr': self.args.bert_lr},
             
-            {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay)],
-             'weight_decay': 1e-4, 'lr': self.args.lr},
-            {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay)],
-             'weight_decay': 0.0, 'lr': self.args.lr},
+            {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay) and any(lp in n for lp in labelspace_param)],
+             'weight_decay': 1e-4, 'lr': self.args.bert_lr},
+            {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay) and any(lp in n for lp in labelspace_param)],
+             'weight_decay': 0.0, 'lr': self.args.bert_lr},
             
+            {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay) and not any(lp in n for lp in labelspace_param)],
+             'weight_decay': 1e-4, 'lr': self.args.lr},
+            {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay) and not any(lp in n for lp in labelspace_param)],
+             'weight_decay': 0.0, 'lr': self.args.lr},
         ]
-        
         self.optimizer = torch.optim.AdamW(optimizer_parameters, lr=self.args.lr, eps=1e-8)
         max_step = len(self.train_loader) * self.args.epoch
         self.scheduler = WarmupLinearSchedule(self.optimizer, warmup_steps=max_step // 15, t_total=max_step)
@@ -118,7 +138,7 @@ class Trainer(object):
     def train_epoch(self, ep=0):
         self.slu_model.train()
         t1 = time.time()
-        loss_tr = {"bio_loss": 0., "slu_loss": 0., "cl_loss": 0., "orth_loss": 0.}
+        loss_tr = {"bio_loss": 0., "slu_loss": 0., "cl_loss": 0., "orth_loss": 0., "utter": 0., "label": 0., "vae_kl": 0.}
         for i, batch_train_data in enumerate(self.train_loader):
             # mask_p = self.get_mask_p(ep-1)
             batch = batch_variable(batch_train_data, self.vocabs, self.args.tgt_dm, mode='train')
@@ -128,12 +148,32 @@ class Trainer(object):
             loss, dict = self.slu_model(batch.bert_inputs,
                                         len(domain2slot[batch_train_data[0].domain]),
                                         batch.bio_label, batch.slu_label, O_tag_idx, 
-                                        mask=batch.token_mask
+                                        mask=batch.token_mask,
+                                        train='utter',
                                         )
             loss_tr["bio_loss"] = dict["bio_loss"]
             loss_tr["slu_loss"] = dict["slu_loss"]
             loss_tr["cl_loss"] = dict["cl_loss"]
             loss_tr["orth_loss"] = dict["orth_loss"]
+            # loss_tr["utter"] = dict["utter"]
+            # loss_tr["label"] = dict["label"]
+            logger.info('[Epoch %d] [lr: %.4f] Utter Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f, orth_loss: %.4f' % \
+                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"], loss_tr["orth_loss"]))
+            
+            loss.backward()
+            self.optimizer.step()
+            self.slu_model.zero_grad()
+            loss, dict = self.slu_model(batch.bert_inputs,
+                            len(domain2slot[batch_train_data[0].domain]),
+                            batch.bio_label, batch.slu_label, O_tag_idx, 
+                            mask=batch.token_mask,
+                            train='label',
+                            )
+            loss_tr["bio_loss"] = dict["bio_loss"]
+            loss_tr["slu_loss"] = dict["slu_loss"]
+            loss_tr["cl_loss"] = dict["cl_loss"]
+            loss_tr["orth_loss"] = dict["orth_loss"]
+            loss_tr["vae_kl"] = dict["vae_kl"]
             
             loss.backward()
             self.optimizer.step()
@@ -146,8 +186,8 @@ class Trainer(object):
             #     "lr": self.scheduler.get_last_lr()[-1]
             # })
 
-            logger.info('[Epoch %d] [lr: %.4f] Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f, orth_loss: %.4f' % \
-                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"], loss_tr["orth_loss"]))
+            logger.info('[Epoch %d] [lr: %.4f] Label Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f, orth_loss: %.4f, vae_kl: %.4f' % \
+                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"], loss_tr["orth_loss"], loss_tr["vae_kl"]))
         return loss_tr
 
 
@@ -469,7 +509,7 @@ if __name__ == '__main__':
     else:
         args.device = torch.device('cpu')
     
-    random_seed = [1314, 3407, 2019, 2020, 2021, 2022, 2023]
+    random_seed = [1314, 1315, 1316, 1317, 1318]
     final_res = {'p': [], 'r': [], 'f': []}
     for seed in random_seed:
         set_seeds(seed)
@@ -480,7 +520,7 @@ if __name__ == '__main__':
         final_res['p'].append(prf['slu_p'])
         final_res['r'].append(prf['slu_r'])
         final_res['f'].append(prf['slu_f'])
-        break
+        # break
     final_res['p'] = np.array(final_res['p'])
     final_res['r'] = np.array(final_res['r'])
     final_res['f'] = np.array(final_res['f'])

@@ -247,6 +247,9 @@ class BertEmbeddings(nn.Module):
                     position_embeddings = self.position_embeddings(position_ids).expand(bsz, position_ids.size(1), -1).contiguous()
                 else:
                     position_embeddings = torch.zeros((bsz, seq_length + past_key_values_length, inputs_embeds.size(-1)), device=inputs_embeds.device)
+                    # zero index for pos embedding
+                    # position_ids = self.position_ids[:, past_key_values_length : seq_length + past_key_values_length].fill_(0)
+                    # position_embeddings = self.position_embeddings(position_ids).expand(bsz, position_ids.size(1), -1).contiguous()
             else:
                 raise NotImplementedError
             embeddings += position_embeddings
@@ -574,7 +577,11 @@ class BertEncoder(nn.Module):
         self.config = config
         self.layer = nn.ModuleList([BertLayer(config) for _ in range(config.num_hidden_layers)])
         self.gradient_checkpointing = False
-        self.bottleneck = nn.Parameter(nn.init.normal_(torch.Tensor(1, num_bottleneck, config.hidden_size), std=0.02))
+        # TODO: shared bottleneck
+        # self.bottleneck = nn.Parameter(nn.init.normal_(torch.Tensor(1, num_bottleneck, config.hidden_size), std=0.02))
+        # self.bottleneck_layers = bottleneck_layers
+        
+        self.bottleneck = nn.Parameter(nn.init.normal_(torch.Tensor(len(bottleneck_layers), num_bottleneck, config.hidden_size), std=0.02))
         self.bottleneck_layers = bottleneck_layers
 
     def forward(
@@ -606,11 +613,14 @@ class BertEncoder(nn.Module):
         for modality in hidden_states.keys():
             modality_size[modality] = list(hidden_states[modality].size())
             bsz, _, hidden_size = hidden_states[modality].size()
-            
-        bottleneck = self.bottleneck.expand(bsz, -1, hidden_size)
+        
+        # TODO: shared bottleneck    
+        # bottleneck = self.bottleneck.expand(bsz, -1, hidden_size)
         for i, layer_module in enumerate(self.layer):
             layer_modality_outputs = dict()
-            bottleneck_lst = []
+            # TODO: shared bottleneck  
+            # bottleneck_lst = []
+            # bottleneck = self.bottleneck.expand(bsz, -1, hidden_size)
             for modality in hidden_states.keys():
                 if output_hidden_states:
                     all_hidden_states[modality] += (hidden_states[modality],)
@@ -620,7 +630,8 @@ class BertEncoder(nn.Module):
                         attention_mask[modality],
                     )
                     hidden_states[modality] = layer_modality_outputs[modality][0]
-                else:           
+                else:
+                    bottleneck = self.bottleneck[i-self.bottleneck_layers[0]].expand(bsz, -1, hidden_size)           
                     layer_modality_outputs[modality] = layer_module(
                         torch.cat([hidden_states[modality], bottleneck], dim=1),
                         torch.cat([attention_mask[modality], 
@@ -629,11 +640,11 @@ class BertEncoder(nn.Module):
                                             device=attention_mask[modality].device)[:, None, None, :]], dim=-1),
                     )
                     hidden_states[modality] = layer_modality_outputs[modality][0][:, :-bottleneck.size(1)]
-                    bottleneck_lst.append(layer_modality_outputs[modality][0][:, -bottleneck.size(1):])
+                    # bottleneck_lst.append(layer_modality_outputs[modality][0][:, -bottleneck.size(1):])
             
             # update bottleneck with different modalities.
-            if len(bottleneck_lst) > 0:        
-                bottleneck = torch.mean(torch.stack(bottleneck_lst, dim=-1), dim=-1)
+            # if len(bottleneck_lst) > 0:        
+            #     bottleneck = torch.mean(torch.stack(bottleneck_lst, dim=-1), dim=-1)
             
             for modality in hidden_states.keys():
                 if use_cache:

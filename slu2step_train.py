@@ -5,22 +5,74 @@ import torch
 import random
 import numpy as np
 from modules.optimizer import Optimizer, AdamW, WarmupLinearSchedule
-from model.slu_mbt_tagger import End2endSLUTagger
-from modules.testTimeTraining import TTT, TTA, TTDistill
-# from weighting.MGDA import MGDA
-# from weighting.DWA import DWA
-# from weighting.UW import UW
+from model.e2e2step_tagger import End2endSLUTagger
 from config.slu_conf import args_config
 from utils.dataset import DataLoader, MultiDomainDataLoader
-from utils.slu_mbt_datautil import load_data, create_vocab, batch_variable, save_to, domain2slot, slot2desp, domain2unseen
+from utils.slu_2step_datautil import load_data, create_vocab, batch_variable, batch_ptr_variable, save_to, domain2slot, slot2desp, domain2unseen
 from utils.conlleval import evaluate
 from logger.logger import logger
-from copy import deepcopy
-import collections
+from copy import deepcopy as dc
 
 # TODO: wandb
 # import wandb
 # import yaml
+
+
+class PretrainDataLoader(object):
+    def __init__(self, dataset: dict, batch_size=1, shuffle=False, collate_fn=None):
+        self.batch_size = batch_size
+        self.shuffle = shuffle
+        self.collate_fn = collate_fn
+        self.dataset = []
+        
+        if isinstance(dataset, dict):
+            for k, v in dataset.items():
+                dm_inst = []
+                for _inst in v:
+                    for _tag in domain2slot[_inst.domain][1:]:
+                        tmp_inst = dc(_inst)
+                        tmp_inst.tokens = [_tag] + tmp_inst.tokens
+                        dm_inst.append(tmp_inst) 
+                self.dataset.extend(dm_inst)
+        elif isinstance(dataset, list):
+            dm_inst = []
+            for _inst in dataset:
+                for _tag in domain2slot[_inst.domain][1:]:
+                    tmp_inst = dc(_inst)
+                    tmp_inst.tokens = [_tag] + tmp_inst.tokens
+                    dm_inst.append(tmp_inst) 
+            self.dataset.extend(dm_inst)
+        else:
+            raise NotImplementedError
+
+    def __iter__(self):
+        n = len(self.dataset)
+        # 打乱顺序
+        if self.shuffle:
+            idxs = np.random.permutation(n)
+        else:
+            idxs = range(n)
+
+        batch = []
+        # batch(Instance1, Instance2, ...)
+        for idx in idxs:
+            batch.append(self.dataset[idx])
+            if len(batch) == self.batch_size:
+                if self.collate_fn:
+                    yield self.collate_fn(batch)
+                else:
+                    yield batch
+                batch = []
+
+        # 剩余的batch
+        if len(batch) > 0:
+            if self.collate_fn:
+                yield self.collate_fn(batch)
+            else:
+                yield batch
+    
+    def __len__(self):
+        return (len(self.dataset) + self.batch_size - 1) // self.batch_size
 
 
 class Trainer(object):
@@ -53,7 +105,12 @@ class Trainer(object):
         print('test data size:', len(self.test_set))
         
         self.train_loader = MultiDomainDataLoader(self.train_set, batch_size=self.args.batch_size, shuffle=True)
-        self.dev_loader = DataLoader(self.val_set, batch_size=self.args.val_batch_size, shuffle=False)  
+        # self.ptr_train_loader = PretrainDataLoader(self.train_set, batch_size=self.args.batch_size, shuffle=True)
+        # self.ptr_dev_loader = PretrainDataLoader(self.val_set, batch_size=self.args.batch_size, shuffle=False)
+        self.ptr_train_loader = MultiDomainDataLoader(self.train_set, batch_size=self.args.batch_size, shuffle=True)
+        self.ptr_dev_loader = DataLoader(self.val_set, batch_size=self.args.batch_size, shuffle=False)
+        
+        self.dev_loader = DataLoader(self.val_set, batch_size=self.args.val_batch_size, shuffle=False)
         self.test_loader = DataLoader(self.test_set, batch_size=self.args.test_batch_size, shuffle=False)
  
         self.vocabs = create_vocab(self.all_dataset, args.bert_path)
@@ -83,38 +140,39 @@ class Trainer(object):
         print(self.slu_model)
         total_params = sum([p.numel() for gen in [self.slu_model.parameters()] for p in gen if p.requires_grad])
         print("Training %dM trainable parameters..." % (total_params/1e6))
-        
-        # self.weighted_loss = UW(task_name=['main_loss', 'orth_loss', 'cl_loss'], device=self.args.device)
-        
-        no_decay = ['bias', 'LayerNorm.weight']
-        optimizer_parameters = [
-            {'params': [p for n, p in self.slu_model.bert_named_params()
-                        if not any(nd in n for nd in no_decay) and p.requires_grad],
-             'weight_decay': 1e-2, 'lr': self.args.bert_lr},
-            {'params': [p for n, p in self.slu_model.bert_named_params()
-                        if any(nd in n for nd in no_decay) and p.requires_grad],
-             'weight_decay': 0.0, 'lr': self.args.bert_lr},
+    
+    def pretrain_epoch(self, ep=0):
+        self.slu_model.train()
+        t1 = time.time()
+        loss_ptr = {"bio_loss": 0.}
+        for i, batch_train_data in enumerate(self.ptr_train_loader):
+            # mask_p = self.get_mask_p(ep-1)
+            batch = batch_ptr_variable(batch_train_data, self.vocabs)
+            batch.to_device(self.args.device)
             
-            {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay)],
-             'weight_decay': 1e-4, 'lr': self.args.lr},
-            {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay)],
-             'weight_decay': 0.0, 'lr': self.args.lr},
+            O_tag_idx = self.vocabs['binary'].inst2idx('O')
+            loss, dict = self.slu_model.pretrain(batch.bert_inputs,
+                                                batch.bio_label, 
+                                                O_tag_idx, 
+                                                mask=batch.token_mask,
+                                                )
+            loss_ptr["bio_loss"] = dict["bio_loss"]
+            logger.info('[Epoch %d] [lr: %.4f] Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f' % \
+                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_ptr["bio_loss"]))
             
-        ]
+            loss.backward()
+            self.optimizer.step()
+            self.scheduler.step()
+            self.slu_model.zero_grad()
+            
+            # TODO: wandb
+            # wandb.log({
+            #     "slu_loss": loss.item(),
+            #     "lr": self.scheduler.get_last_lr()[-1]
+            # })
+            
+        return loss_ptr
         
-        self.optimizer = torch.optim.AdamW(optimizer_parameters, lr=self.args.lr, eps=1e-8)
-        max_step = len(self.train_loader) * self.args.epoch
-        self.scheduler = WarmupLinearSchedule(self.optimizer, warmup_steps=max_step // 15, t_total=max_step)
-
-    # def get_mask_p(self, ep):
-    #     # linear warmup with k=0.3
-    #     # return (sub_p, mask_p)
-    #     if ep > self.ep:
-    #         # return min(0.1 * (ep - 4), 0.5)
-    #         return min(self.step * (ep - self.ep), self.ceil)
-    #     else:
-    #         return 0.
-
     def train_epoch(self, ep=0):
         self.slu_model.train()
         t1 = time.time()
@@ -128,14 +186,31 @@ class Trainer(object):
             loss, dict = self.slu_model(batch.bert_inputs,
                                         len(domain2slot[batch_train_data[0].domain]),
                                         batch.bio_label, batch.slu_label, O_tag_idx, 
-                                        mask=batch.token_mask
+                                        mask=batch.token_mask,
+                                        train='label',
                                         )
             loss_tr["bio_loss"] = dict["bio_loss"]
             loss_tr["slu_loss"] = dict["slu_loss"]
             loss_tr["cl_loss"] = dict["cl_loss"]
             loss_tr["orth_loss"] = dict["orth_loss"]
-            loss_tr["utter"] = dict["utter"]
-            loss_tr["label"] = dict["label"]
+            # loss_tr["utter"] = dict["utter"]
+            # loss_tr["label"] = dict["label"]
+            logger.info('[Epoch %d] [lr: %.4f] Utter Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f, orth_loss: %.4f' % \
+                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"], loss_tr["orth_loss"]))
+            
+            loss.backward()
+            self.optimizer.step()
+            self.slu_model.zero_grad()
+            loss, dict = self.slu_model(batch.bert_inputs,
+                            len(domain2slot[batch_train_data[0].domain]),
+                            batch.bio_label, batch.slu_label, O_tag_idx, 
+                            mask=batch.token_mask,
+                            train='utter',
+                            )
+            loss_tr["bio_loss"] = dict["bio_loss"]
+            loss_tr["slu_loss"] = dict["slu_loss"]
+            loss_tr["cl_loss"] = dict["cl_loss"]
+            loss_tr["orth_loss"] = dict["orth_loss"]
             
             loss.backward()
             self.optimizer.step()
@@ -148,8 +223,8 @@ class Trainer(object):
             #     "lr": self.scheduler.get_last_lr()[-1]
             # })
 
-            logger.info('[Epoch %d] [lr: %.4f] Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f, orth_loss: %.4f, utter: %.4f, label: %.4f' % \
-                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"], loss_tr["orth_loss"], loss_tr["utter"], loss_tr["label"]))
+            logger.info('[Epoch %d] [lr: %.4f] Label Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f, orth_loss: %.4f' % \
+                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"], loss_tr["orth_loss"]))
         return loss_tr
 
 
@@ -168,12 +243,74 @@ class Trainer(object):
         # run = wandb.init(project='backbone-cl-sweep', config = {}, entity='switchsyj')
         # wconfig = wandb.config
         # run.name = f"ep: {wconfig['ep']}, step: {wconfig['step']}, ceil: {wconfig['ceil']}"
-        self.ep = 2
-        self.step = 0.02
-        self.ceil = 0.1
+        # self.ep = 2
+        # self.step = 0.02
+        # self.ceil = 0.1
         
         patient = 0
         best_dev_metric, best_test_metric = dict(), dict()
+        
+        no_decay = ['bias', 'LayerNorm.weight']
+        optimizer_parameters = [
+            {'params': [p for n, p in self.slu_model.bert_named_params()
+                        if not any(nd in n for nd in no_decay) and p.requires_grad],
+             'weight_decay': 1e-2, 'lr': self.args.bert_lr},
+            {'params': [p for n, p in self.slu_model.bert_named_params()
+                        if any(nd in n for nd in no_decay) and p.requires_grad],
+             'weight_decay': 0.0, 'lr': self.args.bert_lr},
+            
+            {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay)],
+             'weight_decay': 1e-4, 'lr': self.args.lr},
+            {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay)],
+             'weight_decay': 0.0, 'lr': self.args.lr},
+            
+        ]
+        
+        print("====== Pretraining ======")
+        self.optimizer = torch.optim.AdamW(optimizer_parameters, lr=self.args.lr, eps=1e-8)
+        max_step = len(self.ptr_train_loader) * 1
+        self.scheduler = WarmupLinearSchedule(self.optimizer, warmup_steps=max_step // 15, t_total=max_step)
+        for ep in range(1, 1+self.args.epoch):
+            train_loss = self.pretrain_epoch(ep)
+            dev_metric = self.evaluate_ptr(self.ptr_dev_loader)
+            if dev_metric['bio_f'] > best_dev_metric.get('bio_f', 0):
+                best_dev_metric = dev_metric
+                self.save_states(self.args.model_ckpt, best_dev_metric)
+                patient = 0
+            else:
+                patient += 1
+            logger.info('[Epoch %d] train loss: %s, patient: %d, dev_metric_p: %s, dev_metric_r: %s, dev_metric_f: %s' %\
+                (ep, train_loss, patient, dev_metric['bio_p'], dev_metric['bio_r'], dev_metric['bio_f']))
+            if patient >= self.args.patient:
+                print(f"======pretraining early stopping with patient:{patient}======")
+                break
+        
+        print("====== Fine tuning ======")
+        # reload best BIO parameters
+        self.reset_parameters(self.args.model_ckpt)
+        optimizer_parameters = [
+            {'params': [p for n, p in self.slu_model.bert_named_params()
+                        if not any(nd in n for nd in no_decay) and p.requires_grad],
+             'weight_decay': 1e-2, 'lr': self.args.bert_lr},
+            {'params': [p for n, p in self.slu_model.bert_named_params()
+                        if any(nd in n for nd in no_decay) and p.requires_grad],
+             'weight_decay': 0.0, 'lr': self.args.bert_lr},
+            
+            {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay)],
+             'weight_decay': 1e-4, 'lr': self.args.lr},
+            {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay)],
+             'weight_decay': 0.0, 'lr': self.args.lr},
+            
+        ]
+        patient = 0
+        self.optimizer = torch.optim.AdamW(optimizer_parameters, lr=self.args.lr, eps=1e-8)
+        max_step = len(self.train_loader) * self.args.epoch
+        self.scheduler = WarmupLinearSchedule(self.optimizer, warmup_steps=max_step // 15, t_total=max_step)
+        # freeze CRF parameters
+        for name, param in self.slu_model.named_parameters():
+            if 'crf' in name or 'lstm' in name:
+                param.requires_grad_(False)
+        
         for ep in range(1, 1+self.args.epoch):
             train_loss = self.train_epoch(ep)
 
@@ -214,68 +351,35 @@ class Trainer(object):
 
         logger.info(f'Training finished, best dev metric: {best_dev_metric}, best test metric: {best_test_metric}')
         
-        # target domain finetuning.
-        # if self.args.ft:
-        #     logger.info(f'======finetuning on target domain======')
-        #     self.ft_loader = DataLoader(self.val_set[:self.n_sample], batch_size=8, shuffle=False)
-        #     self.dev_loader = DataLoader(self.val_set[self.n_sample: 500], batch_size=self.args.val_batch_size, shuffle=False)
-        #     self.reset_parameters(self.args.model_ckpt)
-        #     no_decay = ['bias', 'LayerNorm.weight']
-        #     # for p in self.slu_model.bert_params():
-        #     #     p.requires_grad_(False)
-        #     optimizer_parameters = [
-        #         {'params': [p for n, p in self.slu_model.bert_named_params()
-        #                     if not any(nd in n for nd in no_decay) and p.requires_grad],
-        #         'weight_decay': 1e-2, 'lr': 2e-5},
-        #         {'params': [p for n, p in self.slu_model.bert_named_params()
-        #                     if any(nd in n for nd in no_decay) and p.requires_grad],
-        #         'weight_decay': 0.0, 'lr': 2e-5},
-                
-        #         {'params': [p for n, p in self.slu_model.base_named_params() if not any(nd in n for nd in no_decay)],
-        #         'weight_decay': 1e-4, 'lr': 2e-5},
-        #         {'params': [p for n, p in self.slu_model.base_named_params() if any(nd in n for nd in no_decay)],
-        #         'weight_decay': 0.0, 'lr': 2e-5},
-        #     ]
-        #     self.optimizer = torch.optim.AdamW(optimizer_parameters, lr=2e-5, eps=1e-8)
-        #     best_dev_metric = dict()
-        #     patient = 0
-        #     for ep in range(1, 30):
-        #         self.slu_model.train()
-        #         loss_tr = {"bio_loss": 0., "slu_loss": 0., "cl_loss": 0.}
-        #         for i, ft_data in enumerate(self.ft_loader):
-        #             batch = batch_variable(ft_data, self.vocabs, self.args.tgt_dm, mode='train')
-        #             batch.to_device(self.args.device)
-                    
-        #             O_tag_idx = self.vocabs['binary'].inst2idx('O')
-        #             loss, dict_loss = self.slu_model(batch.bert_inputs,
-        #                                         len(domain2slot[ft_data[0].domain]),
-        #                                         batch.bio_label, batch.slu_label, O_tag_idx, 
-        #                                         mask=batch.token_mask
-        #                                         )
-        #             loss_tr["bio_loss"] = dict_loss["bio_loss"]
-        #             loss_tr["slu_loss"] = dict_loss["slu_loss"]
-        #             loss_tr["cl_loss"] = dict_loss["cl_loss"]
-                    
-        #             loss.backward()
-        #             self.optimizer.step()
-        #             self.slu_model.zero_grad()
-
-        #             logger.info('[Epoch %d] [lr: %.5f] Iter%d, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f' % \
-        #                 (ep, self.scheduler.get_last_lr()[-1], i, loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"]))
-                
-        #         dev_metric = self.evaluate(self.dev_loader)
-        #         if dev_metric['slu_f'] > best_dev_metric.get('slu_f', 0.):
-        #             best_dev_metric = dev_metric
-        #             best_test_metric = self.evaluate(self.test_loader)
-        #             patient = 0
-        #         else:
-        #             patient += 1
-        #         if patient >= self.args.patient:
-        #             print(f"======early stopping with patient:{patient}======")
-        #             break
-        #     print(f"Finetuning finished, best dev metric: {best_dev_metric}, best test metric: {best_test_metric}")
         return best_test_metric
 
+    def evaluate_ptr(self, ptr_test_loader, output_emb=False):
+        """
+        Dev set evaluation
+        """
+        self.slu_model.eval()
+        
+        bio_pred_tags = []
+        bio_gold_tags = []
+        with torch.no_grad():
+            for i, batcher in enumerate(ptr_test_loader):
+                batch = batch_ptr_variable(batcher, self.vocabs)
+                batch.to_device(self.args.device)
+                
+                batch_bio_pred = self.slu_model.evaluate_ptr(batch.bert_inputs, batch.token_mask)
+                seq_len = batch.token_mask.sum(dim=-1)
+                
+                # 记录batch内每个pred slot label
+                for j, bio_pred in enumerate(batch_bio_pred):
+                    # bio_gold_tags.extend(['O', 'O'] + [x.split('-')[0] if (x != 'O' and x.split('-')[1] == slot2desp[batcher[j].tokens[0]]) else 'O' for x in batcher[j].slu_tags])
+                    bio_gold_tags.extend([x.split('-')[0] if x != 'O' else 'O' for x in batcher[j].slu_tags])
+                    sent_bio_pred = self.vocabs['binary'].idx2inst(bio_pred[:seq_len[j]].tolist())
+                    bio_pred_tags.extend(sent_bio_pred)
+                    
+        bio_p, bio_r, bio_f = evaluate([x + '-1' if x != 'O' else x for x in bio_gold_tags], 
+                                       [x + '-1' if x != 'O' else x for x in bio_pred_tags], verbose=False)
+        return {"bio_p": bio_p, "bio_r": bio_r, "bio_f": bio_f}
+    
     def evaluate(self, test_loader, output_emb=False):
         """
         Dev set evaluation
@@ -340,9 +444,9 @@ class Trainer(object):
         ckpt = torch.load(model_ckpt_path)
         
         if not self.args.cl:
-            self.slu_model.load_state_dict(deepcopy({k: v for k, v in ckpt['slu_model_state'].items() if 'tokencl' not in k}))
+            self.slu_model.load_state_dict(dc({k: v for k, v in ckpt['slu_model_state'].items() if 'tokencl' not in k}))
         else:
-            self.slu_model.load_state_dict(deepcopy({k: v for k, v in ckpt['slu_model_state'].items()}))
+            self.slu_model.load_state_dict(dc({k: v for k, v in ckpt['slu_model_state'].items()}))
         
         self.slu_model.zero_grad()
         self.slu_model.train()

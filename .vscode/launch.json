@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "--cuda", "2",
+                "--cuda", "0",
                 "--weight_decay", "1e-4",
                 "--cl",
                 "--cl_type", "cosine",
@@ -30,8 +30,8 @@
                 // "--model_ckpt", "ckpt/debug_vocab.ckpt",
                 // "--vocab_ckpt", "ckpt/debug_vocab.ckpt",
                 // inference
-                "--model_ckpt", "ckpt/end2end_cl/bert_domain_br0.ckpt",
-                "--vocab_ckpt", "ckpt/vocab/bert_domain_cl_br0_vocab.ckpt",
+                "--model_ckpt", "testlog/test_br.ckpt",
+                "--vocab_ckpt", "testlog/test_vocab.ckpt",
                 
                 //coach
                 // "--cuda", "2",

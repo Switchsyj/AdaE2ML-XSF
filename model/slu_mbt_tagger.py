@@ -201,8 +201,13 @@ class End2endSLUTagger(nn.Module):
         bound_embed = torch.matmul(F.softmax(boundary_score, dim=-1), self.bound_embedding.weight)
         type_logits = self.hidden_proj(torch.cat((token_repr, bound_embed), dim=-1).contiguous())
         
-        type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
-        type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
+        type_score_label = torch.matmul(F.normalize(type_logits, p=2, dim=-1).detach(), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
+        type_loss_label = F.cross_entropy(type_score_label.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
+        
+        type_score_utter = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2).detach()) / self.temperature  # (B, N, D) x (B, D, K)
+        type_loss_utter = F.cross_entropy(type_score_utter.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
+        type_loss = 1.0 * type_loss_label + type_loss_utter
+        
         type_mask = (boundary_labels.ne(O_tag_idx) * mask).float()
         type_loss = torch.sum(type_loss * type_mask, dim=1)
         
@@ -322,7 +327,7 @@ class End2endSLUTagger(nn.Module):
         else:
             cl_loss = torch.tensor([0.])
 
-        return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": orth_loss}
+        return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": orth_loss, "utter": torch.sum(type_loss_utter * type_mask, dim=1).mean().item(), "label": torch.sum(type_loss_label * type_mask, dim=1).mean().item()}
     
     def tag_loss(self, tag_score, gold_tags, mask=None, reduction='mean', alg='crf'):
         '''
