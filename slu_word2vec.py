@@ -53,7 +53,7 @@ class Trainer(object):
         self.dev_loader = DataLoader(self.val_set, batch_size=self.args.val_batch_size, shuffle=False)
         self.test_loader = DataLoader(self.test_set, batch_size=self.args.test_batch_size, shuffle=False)
 
-        self.vocabs = create_vocab(self.all_dataset, args.bert_path, '/root/autodl-tmp/zero-shot-slu/data/snips/cache/glove.840B.300d.txt')
+        self.vocabs = create_vocab(self.all_dataset, args.bert_path, '/cognitive_comp/shiyuanjun/zero-shot-slu/data/snips/cache/glove.840B.300d.txt')
         # save_to(args.vocab_ckpt, self.vocabs)
 
         print([x for x in self.vocabs["binary"]])
@@ -112,12 +112,43 @@ class Trainer(object):
             batch.to_device(self.args.device)
             
             O_tag_idx = self.vocabs['binary'].inst2idx('O')
+            # loss, dict = self.slu_model(batch.bert_inputs,
+            #                             batch.bert_label_inputs,
+            #                             batch.glove_label_inputs,
+            #                             len(domain2slot[batch_train_data[0].domain]),
+            #                             batch.bio_label, batch.slu_label, O_tag_idx, 
+            #                             mask=batch.token_mask
+            #                             )
+            # loss_tr["bio_loss"] = dict["bio_loss"]
+            # loss_tr["slu_loss"] = dict["slu_loss"]
+            # loss_tr["cl_loss"] = dict["cl_loss"]
+            
             loss, dict = self.slu_model(batch.bert_inputs,
                                         batch.bert_label_inputs,
                                         batch.glove_label_inputs,
                                         len(domain2slot[batch_train_data[0].domain]),
                                         batch.bio_label, batch.slu_label, O_tag_idx, 
-                                        mask=batch.token_mask
+                                        mask=batch.token_mask,
+                                        train='utter',
+                                        )
+            loss_tr["bio_loss"] = dict["bio_loss"]
+            loss_tr["slu_loss"] = dict["slu_loss"]
+            loss_tr["cl_loss"] = dict["cl_loss"]
+            # loss_tr["utter"] = dict["utter"]
+            # loss_tr["label"] = dict["label"]
+            logger.info('[Epoch %d] [lr: %.4f] Utter Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f' % \
+                (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"]))
+            
+            loss.backward()
+            self.optimizer.step()
+            self.slu_model.zero_grad()
+            loss, dict = self.slu_model(batch.bert_inputs,
+                                        batch.bert_label_inputs,
+                                        batch.glove_label_inputs,
+                                        len(domain2slot[batch_train_data[0].domain]),
+                                        batch.bio_label, batch.slu_label, O_tag_idx, 
+                                        mask=batch.token_mask,
+                                        train='label',
                                         )
             loss_tr["bio_loss"] = dict["bio_loss"]
             loss_tr["slu_loss"] = dict["slu_loss"]
@@ -134,7 +165,7 @@ class Trainer(object):
             #     "lr": self.scheduler.get_last_lr()[-1]
             # })
 
-            logger.info('[Epoch %d] [lr: %.4f] Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f' % \
+            logger.info('[Epoch %d] [lr: %.4f] Label Iter%d time cost: %.4fs, loss: %.4f, binary_loss: %.4f, slu_loss: %.4f, cl_loss: %.4f' % \
                 (ep, self.scheduler.get_last_lr()[-1], i, (time.time() - t1), loss.item(), loss_tr["bio_loss"], loss_tr["slu_loss"], loss_tr["cl_loss"]))
         return loss_tr
 
@@ -333,10 +364,10 @@ if __name__ == '__main__':
 
 
 # train cl
-# nohup python slu_word2vec.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm AddToPlaylist --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_atp0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_atp0_vocab.ckpt &> training_log/word2vec/bert_domain_atp0.log &
-# nohup python slu_word2vec.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm BookRestaurant --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_br0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_br0_vocab.ckpt &> training_log/word2vec/bert_domain_br0.log &
-# nohup python slu_word2vec.py --cuda 1 -lr 1e-3 --n_sample 0 --tgt_dm GetWeather --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_gw0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_gw0_vocab.ckpt &> training_log/word2vec/bert_domain_gw0.log &
-# nohup python slu_word2vec.py --cuda 1 -lr 1e-3 --n_sample 0 --tgt_dm PlayMusic --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_pm0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_pm0_vocab.ckpt &> training_log/word2vec/bert_domain_pm0.log &
-# nohup python slu_word2vec.py --cuda 2 -lr 1e-3 --n_sample 0 --tgt_dm RateBook --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_rb0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_rb0_vocab.ckpt &> training_log/word2vec/bert_domain_rb0.log &
-# nohup python slu_word2vec.py --cuda 2 -lr 1e-3 --n_sample 0 --tgt_dm SearchCreativeWork --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_scw0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_scw0_vocab.ckpt &> training_log/word2vec/bert_domain_scw0.log &
-# nohup python slu_word2vec.py --cuda 2 -lr 1e-3 --n_sample 0 --tgt_dm SearchScreeningEvent --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt ckpt/end2end_cl/bert_domain_cl_sse0.ckpt --vocab_ckpt ckpt/vocab/bert_domain_cl_sse0_vocab.ckpt &> training_log/word2vec/bert_domain_sse0.log &
+# nohup python slu_word2vec.py --cuda 5 -lr 1e-3 --n_sample 0 --tgt_dm AddToPlaylist --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_atp.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_atp.log &
+# nohup python slu_word2vec.py --cuda 5 -lr 1e-3 --n_sample 0 --tgt_dm BookRestaurant --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_br.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_br.log &
+# nohup python slu_word2vec.py --cuda 5 -lr 1e-3 --n_sample 0 --tgt_dm GetWeather --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_gw.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_gw.log &
+# nohup python slu_word2vec.py --cuda 6 -lr 1e-3 --n_sample 0 --tgt_dm PlayMusic --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_pm.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_pm.log &
+# nohup python slu_word2vec.py --cuda 6 -lr 1e-3 --n_sample 0 --tgt_dm RateBook --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_rb.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_rb.log &
+# nohup python slu_word2vec.py --cuda 6 -lr 1e-3 --n_sample 0 --tgt_dm SearchCreativeWork --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_scw.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_scw.log &
+# nohup python slu_word2vec.py --cuda 7 -lr 1e-3 --n_sample 0 --tgt_dm SearchScreeningEvent --epoch 30 --emb_dim 768 --dropout 0.3 --model_ckpt testlog/test_sse.ckpt --vocab_ckpt testlog/test_vocab.ckpt &> fs_log/bbglove_sse.log &

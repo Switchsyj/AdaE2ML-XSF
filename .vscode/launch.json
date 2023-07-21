@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "--cuda", "0",
+                "--cuda", "1",
                 "--weight_decay", "1e-4",
                 "--cl",
                 "--cl_type", "cosine",

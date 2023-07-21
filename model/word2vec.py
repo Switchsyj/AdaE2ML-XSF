@@ -34,7 +34,7 @@ class End2endSLUTagger(nn.Module):
                                   use_proj=False)
         self.pretrained_embedding = PretrainedEmbedding(
             self.vocabs['token'], 
-            emb_file='data/snips/cache/glove.840B.300d.txt', 
+            emb_file='/cognitive_comp/shiyuanjun/zero-shot-slu/data/snips/cache/glove.840B.300d.txt', 
             num_words=len(self.vocabs['token']), 
             emb_dim=300
         )
@@ -50,16 +50,21 @@ class End2endSLUTagger(nn.Module):
         nn.init.xavier_uniform_(self.bound_embedding.weight)
 
         self.hidden2boundary = nn.Linear(2*hidden_size, num_bound)
-        # self.down_proj = nn.Linear(1068, 768)
-        # self.up_proj = nn.Linear(768, 1068)
+        self.down_proj = nn.Linear(1068, 768)
+        # self.up_proj = nn.Linear(300, 768)
 
         self.tag_crf = CRF(num_tags=num_bound, batch_first=True)
         self.temperature = 1.0
-        self.hidden_proj = nn.Linear(2 * hidden_size + 10, self.bert_embed_dim+300)
+        self.hidden_proj = nn.Linear(2 * hidden_size + 10, self.bert_embed_dim)
 
         self.use_cl = use_cl
         if use_cl:
             self.tokencl = TokenCL(self.bert_embed_dim, cl_type, cl_temperature)
+        
+        self.label_adapter = nn.Sequential(nn.Linear(self.bert_embed_dim, self.bert_embed_dim//4, bias=False),
+                                    getattr(nn, 'GELU')(),
+                                    # nn.Dropout(p=0.3),
+                                    nn.Linear(self.bert_embed_dim//4, self.bert_embed_dim, bias=False))
 
     def bert_params(self):
         return self.bert.bert.parameters()
@@ -89,10 +94,12 @@ class End2endSLUTagger(nn.Module):
         如果预测的是其他类型，则将边界标签和类别标签进行组合，进而评估最终性能
         ''' 
         # bert embedding
-        bert_token_repr = self.bert(*bert_token_inps)[:, 1:]
-        bert_label_repr = self.bert(*bert_label_inps)[:, 1:].squeeze(1)
-        # bert_label_repr = bert_label_repr.expand(bert_token_repr.size(0), bert_label_repr.size(1), bert_label_repr.size(2)).contiguous()
-        bert_label_repr = bert_label_repr.unsqueeze(0).expand(bert_token_repr.size(0), bert_label_repr.size(0), bert_label_repr.size(1)).contiguous()
+        bert_embedding = self.bert(*bert_token_inps)
+        bert_label_repr = bert_embedding[:, 1: num_type+1]
+        bert_token_repr = bert_embedding[:, num_type+1:]
+        # bert_label_repr = self.bert(*bert_label_inps)[:, 1:].squeeze(1)
+        # # bert_label_repr = bert_label_repr.expand(bert_token_repr.size(0), bert_label_repr.size(1), bert_label_repr.size(2)).contiguous()
+        # bert_label_repr = bert_label_repr.unsqueeze(0).expand(bert_token_repr.size(0), bert_label_repr.size(0), bert_label_repr.size(1)).contiguous()
         
         # backbone
         # bert_repr = self.bert(*bert_token_inps)
@@ -104,8 +111,20 @@ class End2endSLUTagger(nn.Module):
         label_chunks = glove_label_repr.view(-1, glove_label_repr.size(-1)).split(glove_label_inps[1].view(-1).tolist())
         glove_label_embedding = torch.stack(tuple([bc.mean(0) for bc in label_chunks])).view(glove_label_inps[1].size(0), glove_label_inps[1].size(1), -1).contiguous()
         
+        # label_embedding = self.up_proj(glove_label_embedding)
+        # label_embedding = label_embedding + self.label_adapter(label_embedding)
+        
+        # TODO: discrete embedding.
+        # bert_label_repr = []
+        # for _, inps in enumerate(bert_label_inps):
+        #     inps = [x.to(bert_token_repr.device) for x in inps]
+        #     bert_label_repr.append(self.bert(*inps)[:, 1:])
+        # bert_label_repr = torch.cat(bert_label_repr, dim=1).expand(bert_token_repr.size(0), len(bert_label_repr), bert_label_repr[0].size(-1)).contiguous()
+        # label_embedding = label_embedding + self.label_adapter(label_embedding)
         label_embedding = torch.cat([bert_label_repr, glove_label_embedding], dim=-1)
-        # label_embedding = self.down_proj(label_embedding)
+        label_embedding = self.down_proj(label_embedding)
+        label_embedding = self.label_adapter(label_embedding) + label_embedding
+        
         token_repr = bert_token_repr
         # label_embedding = bert_label_repr
 
@@ -136,17 +155,19 @@ class End2endSLUTagger(nn.Module):
 
     def forward(self, bert_token_inps, bert_label_inps, glove_label_inps, 
                 num_type, boundary_labels, 
-                type_labels, O_tag_idx, mask=None):
+                type_labels, O_tag_idx, mask=None, train='utter'):
         ''' boundary tags -> type tags: B I E S  -> LOC PER ...
         :param bert_inps: bert_ids, segments, bert_masks, bert_lens
         :param mask: (bs, seq_len)  0 for padding
         :return:
         '''
         # bert embedding
-        bert_token_repr = self.bert(*bert_token_inps)[:, 1:]
-        bert_label_repr = self.bert(*bert_label_inps)[:, 1:].squeeze(1)
+        bert_embedding = self.bert(*bert_token_inps)
+        bert_label_repr = bert_embedding[:, 1: num_type+1]
+        bert_token_repr = bert_embedding[:, num_type+1:]
+        # bert_label_repr = self.bert(*bert_label_inps)[:, 1:].squeeze(1)
         # bert_label_repr = bert_label_repr.expand(bert_token_repr.size(0), bert_label_repr.size(1), bert_label_repr.size(2)).contiguous()
-        bert_label_repr = bert_label_repr.unsqueeze(0).expand(bert_token_repr.size(0), bert_label_repr.size(0), bert_label_repr.size(1)).contiguous()
+        # bert_label_repr = bert_label_repr.unsqueeze(0).expand(bert_token_repr.size(0), bert_label_repr.size(0), bert_label_repr.size(1)).contiguous()
         
         # backbone
         # bert_repr = self.bert(*bert_token_inps)
@@ -158,8 +179,19 @@ class End2endSLUTagger(nn.Module):
         label_chunks = glove_label_repr.view(-1, glove_label_repr.size(-1)).split(glove_label_inps[1].view(-1).tolist())
         glove_label_embedding = torch.stack(tuple([bc.mean(0) for bc in label_chunks])).view(glove_label_inps[1].size(0), glove_label_inps[1].size(1), -1).contiguous()
         
+        # TODO: discrete embedding.
+        # bert_label_repr = []
+        # for _, inps in enumerate(bert_label_inps):
+        #     inps = [x.to(bert_token_repr.device) for x in inps]
+        #     bert_label_repr.append(self.bert(*inps)[:, 1:])
+        # bert_label_repr = torch.cat(bert_label_repr, dim=1).expand(bert_token_repr.size(0), len(bert_label_repr), bert_label_repr[0].size(-1)).contiguous()
+        # label_embedding = (label_embedding + self.label_adapter(label_embedding)).detach()
+        
         label_embedding = torch.cat([bert_label_repr, glove_label_embedding], dim=-1)
-        # label_embedding = self.down_proj(label_embedding)
+        label_embedding = self.down_proj(label_embedding)
+        label_embedding = self.label_adapter(label_embedding) + label_embedding
+        # label_embedding = self.up_proj(glove_label_embedding)
+        
         token_repr = bert_token_repr
         # label_embedding = bert_label_repr
         
@@ -179,8 +211,14 @@ class End2endSLUTagger(nn.Module):
         bound_embed = torch.matmul(F.softmax(boundary_score, dim=-1), self.bound_embedding.weight)
         type_logits = self.hidden_proj(torch.cat((token_repr, bound_embed), dim=-1).contiguous())
         
-        type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
-        type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
+        if train == 'utter':
+            type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2).detach()) / self.temperature  # (B, N, D) x (B, D, K)
+            type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
+        elif train == 'label':
+            type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1).detach(), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
+            type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
+        # type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
+        # type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
         type_mask = (boundary_labels.ne(O_tag_idx) * mask).float()
         type_loss = torch.sum(type_loss * type_mask, dim=1)
         loss = torch.mean(boundary_loss + type_loss)

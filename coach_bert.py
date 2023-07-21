@@ -178,7 +178,7 @@ class Trainer(object):
         self.binary_slu_tagger = BinarySLUTagger(emb_dim=self.args.emb_dim, freeze_emb=self.args.freeze_emb, emb_file=self.args.emb_file, num_layers=self.args.num_rnn_layer, hidden_size=self.args.hidden_size, dropout=self.args.dropout, bidirectional=self.args.bidirectional, vocabs=self.vocabs).to(self.args.device)
         self.slotname_predictor = SlotNamePredictor(hidden_size=self.args.hidden_size, bidirectional=self.args.bidirectional, trs_hidden_size=self.args.hidden_size*2, trs_layers=1, slot_emb_file=self.args.slot_emb_file, vocabs=self.vocabs).to(self.args.device)
         self.sent_repre_generator = SentRepreGenerator(emb_dim=self.args.emb_dim, freeze_emb=self.args.freeze_emb, emb_file=self.args.emb_file, hidden_size=self.args.hidden_size, num_layers=self.args.num_rnn_layer, dropout=self.args.dropout, bidirectional=self.args.bidirectional).to(self.args.device)
-        
+        self.down = nn.Linear(self.args.emb_dim, self.args.hidden_size*2, bias=False).to(self.args.device)
         no_decay = ['bias', 'LayerNorm.weight']
         model_parameters = [
             {"params": [p for n, p in self.bert.bert.named_parameters() if not any(nd in n for nd in no_decay)], 'lr': 2e-5, 'weight_decay': 1e-2},
@@ -235,7 +235,7 @@ class Trainer(object):
             # exclude [CLS]
             label_embeddings = []
             for j in range(len(label_inputs)):
-                label_embeddings.append(self.bert(*label_inputs[j])[:, 1:].squeeze(1).transpose(0, 1).contiguous())
+                label_embeddings.append(self.down(self.bert(*label_inputs[j])[:, 1:].squeeze(1)).transpose(0, 1).contiguous())
                    
             pred_slotname_list, gold_slotname_list = self.slotname_predictor(domains, lstm_hiddens, binary_golds=bio_label, final_golds=slu_label, label_reprs=label_embeddings)
             loss_slotname = 0.
@@ -292,7 +292,9 @@ class Trainer(object):
             dev_metric = self.evaluate(self.dev_loader)
             if dev_metric['slu_f'] > best_dev_metric.get('slu_f', 0):
                 best_dev_metric = dev_metric
+                st_time = time.time()
                 best_test_metric = self.evaluate(self.test_loader)
+                print(f"======inference time: {time.time()-st_time}")
                 patient = 0
             else:
                 patient += 1
@@ -302,7 +304,10 @@ class Trainer(object):
                 break
             logger.info('[Epoch %d] train loss: %s, patient: %d, dev_metric: %s, best_dev_metric: %s, best_test_metric: %s' %\
                         (ep, train_loss, patient, dev_metric, best_dev_metric, best_test_metric))
-           
+        
+        st_time = time.time()  
+        self.evaluate(self.test_loader)
+        print(f"======inference time: {time.time()-st_time}")
         logger.info(f'Training finished, best dev metric: {best_dev_metric}, best test metric: {best_test_metric}')
         return best_test_metric
 
@@ -371,7 +376,7 @@ class Trainer(object):
                 # exclude [CLS]
                 label_embeddings = []
                 for j in range(len(label_inputs)):
-                    label_embeddings.append(self.bert(*label_inputs[j])[:, 1:].squeeze(1).transpose(0, 1).contiguous())
+                    label_embeddings.append(self.down(self.bert(*label_inputs[j])[:, 1:].squeeze(1)).transpose(0, 1).contiguous())
                 slotname_preds_batch = self.slotname_predictor(domains, lstm_hiddens, binary_preditions=bin_preds_batch, binary_golds=None, final_golds=None, label_reprs=label_embeddings)
                 
                 final_preds_batch = self.combine_binary_and_slotname_preds(domains, bin_preds_batch, slotname_preds_batch)
@@ -413,19 +418,26 @@ if __name__ == '__main__':
     else:
         args.device = torch.device('cpu')
 
-    # random_seeds = [1314, 1357, 2789, 3391, 3407, 4553, 5919]
-    
+    random_seeds = [1314, 1315, 1316, 1317, 1318]
     final_res = {'p': [], 'r': [], 'f': []}
-    seed = 1314
-    set_seeds(seed)
-    print(f"set seed: {seed}")
-    trainer = Trainer(args, data_config=None)
-    prf = trainer.train()
+    for seed in random_seeds: 
+        set_seeds(seed)
+        print(f"set seed: {seed}")
+        trainer = Trainer(args, data_config=None)
+        prf = trainer.train()
+        final_res['p'].append(prf['slu_p'])
+        final_res['r'].append(prf['slu_r'])
+        final_res['f'].append(prf['slu_f'])
     
-# nohup python coach_bert.py --cuda 1 -lr 1e-3 --n_sample 0 --tgt_dm AddToPlaylist --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_atp0.log &
-# nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm BookRestaurant --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_br0.log & 
-# nohup python coach_bert.py --cuda 2 -lr 1e-3 --n_sample 0 --tgt_dm GetWeather --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_gw0.log & 
-# nohup python coach_bert.py --cuda 1 -lr 1e-3 --n_sample 0 --tgt_dm PlayMusic --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_pm0.log & 
-# nohup python coach_bert.py --cuda 2 -lr 1e-3 --n_sample 0 --tgt_dm RateBook --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_rb0.log & 
+    final_res['p'] = np.array(final_res['p'])
+    final_res['r'] = np.array(final_res['r'])
+    final_res['f'] = np.array(final_res['f'])
+    print(f"avg result: p: {final_res['p'].mean()}+-{final_res['p'].std()}, r: {final_res['r'].mean()}+-{final_res['r'].std()}, f: {final_res['f'].mean()}+-{final_res['f'].std()}")
+    
+# nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm AddToPlaylist --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_atp0.log &
+# nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm BookRestaurant --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/test_bert_br0.log & 
+# nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm GetWeather --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_gw0.log & 
+# nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm PlayMusic --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_pm0.log & 
+# nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm RateBook --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_rb0.log & 
 # nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm SearchCreativeWork --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_scw0.log & 
 # nohup python coach_bert.py --cuda 0 -lr 1e-3 --n_sample 0 --tgt_dm SearchScreeningEvent --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 384 --num_rnn_layer 2 --model_ckpt ckpt/debug.ckpt --vocab_ckpt ckpt/debug_vocab.ckpt &> training_log/coach/baseline_bert_sse0.log & 

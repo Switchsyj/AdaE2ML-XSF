@@ -148,9 +148,9 @@ def batch_variable(batch_data, Vocab, tgt_dm, mode='train'):
     label_len = torch.zeros((bsz, len(domain2slot[batch_data[0].domain])), dtype=torch.long)
     for i in range(bsz):
         tokens, slu_tags = batch_data[i].tokens, batch_data[i].slu_tags 
-        # pref_chars = [slot2desp[y] for y in domain2slot[batch_data[i].domain]]
+        pref_chars = [slot2desp[y] for y in domain2slot[batch_data[i].domain]]
         
-        bert_tokens_list.append(tokens)  
+        bert_tokens_list.append(pref_chars + tokens)  
         # bert_label_list.append([slot2desp[y] for y in domain2slot[batch_data[i].domain]])
         glove_labels = [y for x in domain2slot[batch_data[i].domain] for y in slot2desp[x].split()]
         
@@ -173,6 +173,11 @@ def batch_variable(batch_data, Vocab, tgt_dm, mode='train'):
         slu_bio_label[i, :token_seq_len[i]] = torch.tensor([slot_bio_vocab.inst2idx(x) for x in slu_tags], dtype=torch.long)
     
     bert_inputs = bert_vocab.batch_bertwd2id(bert_tokens_list)
+    # bert_label_inputs = bert_vocab.batch_bertwd2id(bert_label_list)
+    # TODO: discrete inputs
+    # bert_label_inputs = [bert_vocab.batch_bertwd2id([bert_label_list[i]]) for i in range(len(bert_label_list))]
+    
+    # TODO: backbone + glove inputs
     bert_label_inputs = bert_vocab.batch_bertwd2id(bert_label_list)
 
     return Batch(

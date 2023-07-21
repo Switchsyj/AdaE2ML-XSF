@@ -8,7 +8,6 @@ from modules.crf import CRF
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
 import numpy as np
-import math
 
 
 def js_div(p_output, q_output, p_mask, q_mask):
@@ -104,22 +103,6 @@ class End2endSLUTagger(nn.Module):
             self.tokencl = TokenCL(self.bert_embed_dim, cl_type, cl_temperature)
         
         self.ce_loss = LabelSmoothingCrossEntropyLoss(ignore_index=0, reduction='none', label_smoothing=0.2)
-        # TODO: ReLU, GELU
-        # self.label_adapter = nn.Sequential(nn.Linear(self.bert_embed_dim, self.bert_embed_dim//4, bias=False),
-        #                                     getattr(nn, 'ReLU')(),
-        #                                     nn.Linear(self.bert_embed_dim//4, self.bert_embed_dim, bias=False))
-        # TODO: LoRA
-        # self.lora_A = nn.Parameter(self.hidden_proj.weight.new_zeros((self.bert_embed_dim//4, self.bert_embed_dim)))
-        # self.lora_B = nn.Parameter(self.hidden_proj.weight.new_zeros((self.bert_embed_dim, self.bert_embed_dim//4)))
-        # # self.scaling = nn.Parameter(torch.ones(1))
-        # nn.init.kaiming_uniform_(self.lora_A, a=math.sqrt(5))
-        # nn.init.zeros_(self.lora_B)
-        # # self.lnorm = nn.LayerNorm(self.bert_embed_dim, eps=1e-12)
-        # TODO: VAE
-        self.latent_size = self.bert_embed_dim // 6
-        self.hidden2mean = nn.Linear(self.bert_embed_dim, self.latent_size)
-        self.hidden2logv = nn.Linear(self.bert_embed_dim, self.latent_size)
-        self.latent2hidden = nn.Linear(self.latent_size, self.bert_embed_dim)
 
     def bert_params(self):
         return self.bert.bert.parameters()
@@ -149,20 +132,7 @@ class End2endSLUTagger(nn.Module):
         如果预测的是其他类型，则将边界标签和类别标签进行组合，进而评估最终性能
         '''
         bert_repr = self.bert(*bert_inp)
-        # label_embedding = bert_repr[:, 1: num_type+1]
-        # TODO: adapter
-        # label_embedding = self.label_adapter(bert_repr[:, 1: num_type+1].detach()) + bert_repr[:, 1: num_type+1].detach()
-        # TODO: LoRA
-        # label_embedding = (bert_repr[:, 1: num_type+1].detach() @ self.lora_A.transpose(0, 1) @ self.lora_B.transpose(0, 1)) + bert_repr[:, 1: num_type+1].detach()
-        # TODO: VAE
-        # (bsz, seq_len, latent_size)
-        mean = self.hidden2mean(bert_repr[:, 1: num_type+1])
-        logv = self.hidden2logv(bert_repr[:, 1: num_type+1])
-        std = torch.exp(0.5 * logv)
-        z = torch.randn([bert_repr.size(0), num_type, self.latent_size], device=bert_repr.device)
-        z = z * std + mean
-        label_embedding = self.latent2hidden(z)
-        
+        label_embedding = bert_repr[:, 1: num_type+1]
         token_repr = bert_repr[:, num_type+1:]
         
         # bert_repr = self.bert(*bert_inp)
@@ -197,14 +167,8 @@ class End2endSLUTagger(nn.Module):
         loss_final = -torch.log(loss_num) + torch.log(loss_denom)
         return loss_final
 
-    def kl_anneal_function(anneal_function, step, k, x0):
-        if anneal_function == 'logistic':
-            return float(1/(1+np.exp(-k*(step-x0))))
-        elif anneal_function == 'linear':
-            return min(1, step/x0)
-    
     def forward(self, bert_inp, num_type, boundary_labels, 
-                type_labels, O_tag_idx, mask=None, train='utter'):
+                type_labels, O_tag_idx, mask=None):
         ''' boundary tags -> type tags: B I E S  -> LOC PER ...
         :param bert_inps: bert_ids, segments, bert_masks, bert_lens
         :param mask: (bs, seq_len)  0 for padding
@@ -212,23 +176,7 @@ class End2endSLUTagger(nn.Module):
         '''
         
         bert_repr = self.bert(*bert_inp)
-        # label_embedding = bert_repr[:, 1: num_type+1]
-        # TODO: Adapter
-        # label_embedding = self.label_adapter(bert_repr[:, 1: num_type+1].detach()) + bert_repr[:, 1: num_type+1].detach()
-        # TODO: LoRA
-        # label_embedding = (bert_repr[:, 1: num_type+1].detach() @ self.lora_A.transpose(0, 1) @ self.lora_B.transpose(0, 1)) + bert_repr[:, 1: num_type+1].detach()
-        # TODO: VAE
-        # (bsz, num_type, latent_size)
-        mean = self.hidden2mean(bert_repr[:, 1: num_type+1])
-        logv = self.hidden2logv(bert_repr[:, 1: num_type+1])
-        std = torch.exp(0.5 * logv)
-        z = torch.randn([bert_repr.size(0), num_type, self.latent_size], device=bert_repr.device)
-        z = z * std + mean
-        label_embedding = self.latent2hidden(z)
-        KL_loss = -0.5 * torch.sum(1 + logv - mean.pow(2) - logv.exp(), dim=-1).sum() / (bert_repr.size(0) * num_type)
-        # TODO: KL_weight * KL_loss
-        # KL_weight = kl_anneal_function(anneal_function, step, k, x0)
-        
+        label_embedding = bert_repr[:, 1: num_type+1]
         token_repr = bert_repr[:, num_type+1:]
         
         # bert_repr = self.bert(*bert_inp)
@@ -253,27 +201,14 @@ class End2endSLUTagger(nn.Module):
         bound_embed = torch.matmul(F.softmax(boundary_score, dim=-1), self.bound_embedding.weight)
         type_logits = self.hidden_proj(torch.cat((token_repr, bound_embed), dim=-1).contiguous())
         
-        if train == 'utter':
-            type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2).detach()) / self.temperature  # (B, N, D) x (B, D, K)
-            type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
-        elif train == 'label':
-            type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1).detach(), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
-            type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
-        
-        # type_score_utter = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2).detach()) / self.temperature  # (B, N, D) x (B, D, K)
-        # type_loss_utter = F.cross_entropy(type_score_utter.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
-        # type_loss = 0.1 * type_loss_label + type_loss_utter
-        
+        type_score = torch.matmul(F.normalize(type_logits, p=2, dim=-1), F.normalize(label_embedding, p=2, dim=-1).transpose(-1, -2)) / self.temperature  # (B, N, D) x (B, D, K)
+        type_loss = F.cross_entropy(type_score.transpose(1, 2).contiguous(), type_labels, ignore_index=0, reduction='none')  # (B, L)
         type_mask = (boundary_labels.ne(O_tag_idx) * mask).float()
         type_loss = torch.sum(type_loss * type_mask, dim=1)
         
         # TODO: ablation study
         # type_loss = torch.zeros_like(boundary_loss, device=token_repr.device)
-        # TODO: VAE KL_loss
-        if train == 'utter':
-            loss = torch.mean(boundary_loss + type_loss)
-        elif train == 'label':
-            loss = torch.mean(boundary_loss + type_loss) + KL_loss
+        loss = torch.mean(boundary_loss + type_loss)
 
         # # info-nce loss
         # bsz, seq_len, _ = type_logits.size()
@@ -386,8 +321,7 @@ class End2endSLUTagger(nn.Module):
         else:
             cl_loss = torch.tensor([0.])
 
-        # return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": orth_loss, "utter": torch.sum(type_loss_utter * type_mask, dim=1).mean().item(), "label": torch.sum(type_loss_label * type_mask, dim=1).mean().item()}
-        return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": orth_loss, "vae_kl": KL_loss.item()}
+        return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": orth_loss}
     
     def tag_loss(self, tag_score, gold_tags, mask=None, reduction='mean', alg='crf'):
         '''

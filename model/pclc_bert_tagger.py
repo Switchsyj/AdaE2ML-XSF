@@ -105,14 +105,14 @@ class ContrastivePredictor(nn.Module):
         nn.init.constant_(linear2.bias, 0.0)
         self.slot_name_projection_for_slot = nn.Sequential(linear1, activation, drop, linear2)
 
-        linear1 = nn.Linear(self.emb_dim, self.emb_dim, bias=True)
+        linear1 = nn.Linear(hidden_size*2, hidden_size*2, bias=True)
         activation = nn.Tanh()
-        linear2 = nn.Linear(self.emb_dim, self.emb_dim, bias=True)
+        linear2 = nn.Linear(hidden_size*2, hidden_size*2, bias=True)
         self.slot_projection = nn.Sequential(linear1, activation, linear2)
 
-        linear1 = nn.Linear(self.emb_dim, self.emb_dim, bias=True)
+        linear1 = nn.Linear(hidden_size*2, hidden_size*2, bias=True)
         activation = nn.Tanh()
-        linear2 = nn.Linear(self.emb_dim, self.emb_dim, bias=True)
+        linear2 = nn.Linear(hidden_size*2, hidden_size*2, bias=True)
         self.context_projection = nn.Sequential(linear1, activation, linear2)
         
         self.smooth_loss = nn.KLDivLoss(reduction='sum')
@@ -435,7 +435,7 @@ class BertContrastivePredictor(nn.Module):
         self.smooth = smooth
         self.temp = temp  
         
-        linear1 = nn.Linear(self.emb_dim, self.input_dim, bias=True)
+        linear1 = nn.Linear(self.input_dim, self.input_dim, bias=True)
         activation = nn.Tanh()
         drop = nn.Dropout(0.2)
         linear2 = nn.Linear(self.input_dim, self.input_dim, bias=True)
@@ -447,7 +447,7 @@ class BertContrastivePredictor(nn.Module):
 
         self.slot_name_projection_for_context = nn.Sequential(linear1, activation, drop, linear2)
 
-        linear1 = nn.Linear(self.emb_dim, self.input_dim, bias=True)
+        linear1 = nn.Linear(self.input_dim, self.input_dim, bias=True)
         activation = nn.Tanh()
         drop = nn.Dropout(0.2)
         linear2 = nn.Linear(self.input_dim, self.input_dim, bias=True)

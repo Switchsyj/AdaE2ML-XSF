@@ -193,6 +193,7 @@ class Trainer(object):
         self.loss_fn_mse = nn.MSELoss()
         # max_step = len(self.train_loader) * self.args.epoch
         # self.scheduler = WarmupLinearSchedule(self.optimizer, warmup_steps=max_step // 15, t_total=max_step)
+        self.down = nn.Linear(self.args.emb_dim, self.args.hidden_size*2, bias=False).to(self.args.device)
         
     def save_states(self, save_path, best_metric=None):
         self.binary_slu_tagger.zero_grad()
@@ -240,7 +241,7 @@ class Trainer(object):
                 bert_inps = self.vocabs['bert'].batch_bertwd2id([slot_input])
                 bert_inps = [inp.to(self.args.device) for inp in bert_inps]
                 slot_emb = self.bert(*bert_inps)[0, 1:].squeeze()
-                slots_embs_based_on_domain[dm] = slot_emb.detach() if self.args.freeze_emb else slot_emb
+                slots_embs_based_on_domain[dm] = self.down(slot_emb.detach()) if self.args.freeze_emb else slot_emb
             type_loss, con_loss, context_loss = self.slotname_predictor(domains, lstm_hiddens, length, slots_embs_based_on_domain, binary_golds=bio_label, final_golds=slu_label)
             
             loss_slotname = type_loss + self.alpha * con_loss + 0.1 * context_loss
@@ -294,8 +295,10 @@ class Trainer(object):
             dev_metric = self.evaluate(self.dev_loader)
             if dev_metric['slu_f'] > best_dev_metric.get('slu_f', 0):
                 best_dev_metric = dev_metric
-                # self.save_states(self.args.model_ckpt, best_dev_metric)
+                self.save_states(self.args.model_ckpt, best_dev_metric)
+                st_time = time.time()
                 best_test_metric = self.evaluate(self.test_loader)
+                print(f"======inference time: {time.time()-st_time}======")
                 patient = 0
             else:
                 patient += 1
@@ -380,7 +383,7 @@ class Trainer(object):
                     bert_inps = self.vocabs['bert'].batch_bertwd2id([slot_input])
                     bert_inps = [inp.to(self.args.device) for inp in bert_inps]
                     slot_emb = self.bert(*bert_inps)[0, 1:].squeeze()
-                    slots_embs_based_on_domain[dm] = slot_emb.detach() if self.args.freeze_emb else slot_emb
+                    slots_embs_based_on_domain[dm] = self.down(slot_emb.detach()) if self.args.freeze_emb else slot_emb
                 slotname_preds_batch = self.slotname_predictor(domains, lstm_hiddens, length, slots_embs_based_on_domain, binary_preditions=bin_preds_batch, binary_golds=None, final_golds=None)
                 
                 final_preds_batch = self.combine_binary_and_slotname_preds(domains, bin_preds_batch, slotname_preds_batch)
@@ -422,31 +425,31 @@ if __name__ == '__main__':
     else:
         args.device = torch.device('cpu')
 
-    random_seeds = [42, 1314, 2019, 2020, 2021, 2022, 2023]
+    random_seeds = [1314, 1315, 1316, 1317, 1318]
     
     final_res = {'p': [], 'r': [], 'f': []}
     for seed in random_seeds:
-        # set_seeds(seed)
-        # print(f"set seed: {seed}")
+        set_seeds(seed)
+        print(f"set seed: {seed}")
         trainer = Trainer(args, data_config=None, alpha=0.5, theta=0.5, smooth=0.6, temp=0.9)
         prf = trainer.train()
         final_res['p'].append(prf['slu_p'])
         final_res['r'].append(prf['slu_r'])
         final_res['f'].append(prf['slu_f'])
-        break
+        
     final_res['p'] = np.array(final_res['p'])
     final_res['r'] = np.array(final_res['r'])
     final_res['f'] = np.array(final_res['f'])
     print(f"avg result: p: {final_res['p'].mean()}+-{final_res['p'].std()}, r: {final_res['r'].mean()}+-{final_res['r'].std()}, f: {final_res['f'].mean()}+-{final_res['f'].std()}")
     
-# nohup python pclc_bert.py --cuda 0 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm AddToPlaylist --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_atp0.ckpt --vocab_ckpt ckpt/pclc/pclc_vocab.ckpt &> training_log/pclc/baseline_atp0.log &
-# nohup python pclc_bert.py --cuda 2 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm BookRestaurant --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 15 --model_ckpt ckpt/pclc/pclc_br0.ckpt --vocab_ckpt ckpt/pclc/pclc_vocab.ckpt &> training_log/pclc/baseline_br0.log & 
-# nohup python pclc_bert.py --cuda 3 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm GetWeather --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_gw0.ckpt --vocab_ckpt ckpt/pclc/pclc_vocab.ckpt &> training_log/pclc/baseline_gw0.log &
+# nohup python pclc_bert.py --cuda 1 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm AddToPlaylist --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_bert_atp0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_atp0.log &
+# nohup python pclc_bert.py --cuda 1 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm BookRestaurant --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_bert_br0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_br0.log & 
+# nohup python pclc_bert.py --cuda 3 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm GetWeather --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_bert_gw0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_gw0.log &
 
-# nohup python pclc_bert.py --cuda 3 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm PlayMusic --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 15 --model_ckpt ckpt/pclc/pclc_pm0.ckpt --vocab_ckpt ckpt/pclc/pclc_pm0_vocab.ckpt &> training_log/pclc/baseline_pm0.log &
-# nohup python pclc_bert.py --cuda 1 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm RateBook --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 15 --model_ckpt ckpt/pclc/debug.ckpt --vocab_ckpt ckpt/pclc/debug_vocab.ckpt &> training_log/pclc/baseline_rb0.log & 
-# nohup python pclc_bert.py --cuda 2 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm SearchCreativeWork --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 15  --model_ckpt ckpt/pclc/debug.ckpt --vocab_ckpt ckpt/pclc/debug_vocab.ckpt &> training_log/pclc/baseline_scw0.log & 
-# nohup python pclc_bert.py --cuda 3 -lr 5e-4 --n_sample 0 --batch_size 32 --tgt_dm SearchScreeningEvent --tr --epoch 300 --emb_dim 768 --dropout 0.3 --hidden_size 192 --num_rnn_layer 1 --patient 15 --model_ckpt ckpt/pclc/debug.ckpt --vocab_ckpt ckpt/pclc/debug_vocab.ckpt &> training_log/pclc/baseline_sse0.log & 
+# nohup python pclc_bert.py --cuda 2 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm PlayMusic --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_bert_pm0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_pm0.log &
+# nohup python pclc_bert.py --cuda 2 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm RateBook --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_bert_rb0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_rb0.log & 
+# nohup python pclc_bert.py --cuda 7 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm SearchCreativeWork --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5  --model_ckpt ckpt/pclc/pclc_bert_scw0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_scw0.log & 
+# nohup python pclc_bert.py --cuda 3 -lr 1e-3 --n_sample 0 --batch_size 32 --tgt_dm SearchScreeningEvent --freeze_emb --tr --epoch 60 --emb_dim 768 --dropout 0.3 --hidden_size 200 --num_rnn_layer 1 --patient 5 --model_ckpt ckpt/pclc/pclc_bert_sse0.ckpt --vocab_ckpt ckpt/pclc/pclc_bert_vocab.ckpt &> training_log/pclc/baseline_bert_sse0.log & 
 
 # PCLC training
 # nohup python slu_main.py --cuda 2 --n_samples 0 --epoch 300 --exp_name pclc --exp_id atp_0 --alpha 0.4 --theta 0.1 --smooth_factor 0.99 --temperature 0.5 --early_stop 5 --bidirection --freeze_emb --tgt_dm AddToPlaylist --tr --emb_file ./data/snips/emb/slu_word_char_embs_with_slotembs.npy &> atp0.log &

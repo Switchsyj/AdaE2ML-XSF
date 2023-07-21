@@ -1,0 +1,5 @@
+nohup: ignoring input
+Traceback (most recent call last):
+  File "gpt3DataConstruction.py", line 2, in <module>
+    import openai as ai
+ModuleNotFoundError: No module named 'openai'
