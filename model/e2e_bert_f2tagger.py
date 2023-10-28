@@ -70,7 +70,9 @@ class End2endSLUTagger(nn.Module):
                  use_cl=False,
                  cl_type='cosine',
                  bert_model_path=None,
-                 cl_temperature=1.0
+                 cl_temperature=1.0,
+                 alpha=None,
+                 beta=None,
                  ):
         super(End2endSLUTagger, self).__init__()
         self.vocabs = vocabs
@@ -109,6 +111,8 @@ class End2endSLUTagger(nn.Module):
                                             getattr(nn, 'GELU')(),
                                             # nn.Dropout(p=0.3),
                                             nn.Linear(self.bert_embed_dim//4, self.bert_embed_dim, bias=False))
+        self.alpha = alpha
+        self.beta = beta
         # std initialization for adapter
         # for m in self.label_adapter:
         #     if type(m) == nn.Linear:
@@ -275,7 +279,7 @@ class End2endSLUTagger(nn.Module):
         # TODO: ablation study
         # type_loss = torch.zeros_like(boundary_loss, device=token_repr.device)
         # TODO: VAE KL_loss
-        loss = torch.mean(boundary_loss + type_loss)
+        loss = torch.mean(boundary_loss + self.alpha * type_loss)
         # elif train == 'label':
         #     loss = torch.mean(boundary_loss + type_loss) + KL_loss
 
@@ -390,12 +394,12 @@ class End2endSLUTagger(nn.Module):
             # cl_loss = self.tokencl(cl_repr, cl_labels,
             #                        torch.cat([torch.ones((cl_repr.size(0), num_type), device=cl_repr.device), 
             #                                   mask], dim=1))
-            loss += cl_loss
+            loss += (self.beta * cl_loss)
         else:
             cl_loss = torch.tensor([0.])
 
         # return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": orth_loss, "utter": torch.sum(type_loss_utter * type_mask, dim=1).mean().item(), "label": torch.sum(type_loss_label * type_mask, dim=1).mean().item()}
-        return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": masked_orth_loss}
+        return loss, {"bio_loss": boundary_loss.mean().item(), "slu_loss": type_loss.mean().item(), "cl_loss": cl_loss.item(), "orth_loss": masked_orth_loss.item()}
     
     def tag_loss(self, tag_score, gold_tags, mask=None, reduction='mean', alg='crf'):
         '''

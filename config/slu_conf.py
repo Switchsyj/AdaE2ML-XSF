@@ -28,6 +28,9 @@ def args_config():
     parse.add_argument('--epoch', type=int, default=20, help='max epoch')
     parse.add_argument('--patient', type=int, default=5, help='patient')
     
+    parse.add_argument('--src', type=str, default="snips", help='patient')
+    parse.add_argument('--tgt', type=str, default="atis", help='patient')
+    
     # modules
     parse.add_argument('--tr', default=False, action='store_true', help='use template regularization')
     parse.add_argument('--cl', default=False, action='store_true', help='use contrastive learning')

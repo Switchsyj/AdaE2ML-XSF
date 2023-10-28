@@ -12,7 +12,7 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "--cuda", "1",
+                "--cuda", "0",
                 "--weight_decay", "1e-4",
                 "--cl",
                 "--cl_type", "cosine",
@@ -32,6 +32,10 @@
                 // inference
                 "--model_ckpt", "testlog/test_br.ckpt",
                 "--vocab_ckpt", "testlog/test_vocab.ckpt",
+                
+                //cross dataset
+                "--src", "atis",
+                "--tgt", "sgd",
                 
                 //coach
                 // "--cuda", "2",

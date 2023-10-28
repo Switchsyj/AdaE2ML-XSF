@@ -117,12 +117,13 @@ class MultiDomainDataLoader(object):
 
     def __iter__(self):
         dms = list(self.dataset.keys())
+        # external shuffle
         if self.shuffle:
             random.shuffle(dms)
         for dm in dms:
             if len(self.dataset[dm]) > 0:
                 n = len(self.dataset[dm])
-                # 打乱顺序
+                # internal shuffle
                 if self.shuffle:
                     idxs = np.random.permutation(n)
                 else:

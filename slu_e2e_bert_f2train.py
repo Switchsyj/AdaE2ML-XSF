@@ -572,3 +572,12 @@ if __name__ == '__main__':
 
 # nohup python slu_e2e_bert_domain_unseen_train.py --cuda 3 -lr 1e-3 --n_sample 0 --tgt_dm SearchCreativeWork --epoch 30 --dropout 0.3 --cl --cl_type kl --cl_temperature 2.0 --model_ckpt testlog/test_scw.ckpt --vocab_ckpt ckpt/vocab/test_vocab.ckpt &> testlog/bert_domain_cl_scw0.log &
 # nohup python slu_e2e_bert_domain_unseen_train.py --cuda 3 -lr 1e-3 --n_sample 0 --tgt_dm SearchScreeningEvent --epoch 30 --dropout 0.3 --cl --cl_type kl --cl_temperature 2.0 --model_ckpt testlog/test_sse.ckpt --vocab_ckpt ckpt/vocab/testsse_vocab.ckpt &> testlog/bert_domain_cl_sse0.log &
+
+# nohup python slu_e2e_bert_f2train.py --cuda 4 -lr 1e-3 --n_sample 0 --tgt_dm AddToPlaylist --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.3 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/atp101005.log &
+# nohup python slu_e2e_bert_f2train.py --cuda 4 -lr 1e-3 --n_sample 0 --tgt_dm BookRestaurant --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.07 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/br101005.log &
+# nohup python slu_e2e_bert_f2train.py --cuda 4 -lr 1e-3 --n_sample 0 --tgt_dm GetWeather --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.5 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/gw101005.log &
+# nohup python slu_e2e_bert_f2train.py --cuda 7 -lr 1e-3 --n_sample 0 --tgt_dm PlayMusic --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.7 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/pm101005.log &
+# nohup python slu_e2e_bert_f2train.py --cuda 7 -lr 1e-3 --n_sample 0 --tgt_dm RateBook --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.7 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/rb101005.log &
+# nohup python slu_e2e_bert_f2train.py --cuda 3 -lr 1e-3 --n_sample 0 --tgt_dm SearchCreativeWork --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.5 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/scw101005.log &
+
+# nohup python slu_e2e_bert_f2train.py --cuda 7 -lr 1e-3 --n_sample 0 --tgt_dm SearchScreeningEvent --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.5 --model_ckpt loss_log/test.ckpt --vocab_ckpt loss_log/test_vocab.ckpt &> loss_log/sse101005.log &
