@@ -38,6 +38,9 @@ def args_config():
     parse.add_argument('--cl_type', type=str, default='cosine', help='CL loss function')
     parse.add_argument('--ft', default=False, action='store_true', help='two step finetuning on the target domain')
     
+    parse.add_argument('--alpha', default=1.0, type=float, help='weight for typing loss')
+    parse.add_argument('--beta', default=1.0, type=float, help='weight for CL loss')
+    
     parse.add_argument('--emb_file', type=str, default='data/snips/cache/slu_word_char_embs_with_slotembs.npy', help='pretrained word embedding file')
     parse.add_argument('--emb_dim', type=int, default=768, help='pretrained word embedding dim')
     parse.add_argument('--bio_emb_dim', type=int, default=10, help='BIO embedding dim')
