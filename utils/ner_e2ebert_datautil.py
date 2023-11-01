@@ -3,9 +3,6 @@ from utils.vocab import BERTVocab, Vocab, MultiVocab
 import torch
 import collections
 import pickle
-import numpy as np
-import json
-import random
 import copy
 import numpy as np
 
@@ -32,7 +29,6 @@ domain2slot = {
 }
 
 slot2desp = {'[PAD]': '[PAD]', 'PER': 'person', 'ORG': 'organization', 'LOC': 'location', 'MISC': 'miscellaneous'}
-# slot2desp = {'[PAD]': '[PAD]', 'PER': 'PER', 'ORG': 'ORG', 'LOC': 'LOC', 'MISC': 'MISC'}
 domain2unseen = {'conll2003': [], 'tech': []}
 
 def read_insts(file_reader, dm):
@@ -100,69 +96,6 @@ def batch_variable(batch_data, Vocab, tgt_dm, mask_p=(0., 0), mode='train'):
     bsz = len(batch_data)
     desp2slot = {v: k for k, v in slot2desp.items()}
     
-    # TODO: random entity substitution
-    # with open('data/ner/conll2003/conll2003_ent4otherdm.json') as f:
-    #     type2entity = json.load(f)
-
-    # sub_batch = SubstitutionBatch(batch_data)
-    # for i in range(bsz):
-    #     tokens, slu_tags = batch_data[i].tokens, batch_data[i].slu_tags
-    #     # # TODO: substitute the whole entity.
-    #     if mode == 'train' and mask_p[0] > 0.:
-    #         masked_tokens = []
-    #         masked_slu_tags = []
-    #         sub_flag = False
-    #         for j, tok in enumerate(tokens):
-    #             if slu_tags[j][0] == 'B' and np.random.rand() < mask_p[0]:
-    #                 random.shuffle(type2entity[desp2slot[slu_tags[j][2:]]])
-    #                 random_ent = type2entity[desp2slot[slu_tags[j][2:]]][0].split()
-    #                 masked_tokens.extend(random_ent)
-    #                 masked_slu_tags.append(slu_tags[j])
-    #                 masked_slu_tags.extend([f'I-{slu_tags[j][2:]}'] * (len(random_ent)-1))
-    #                 sub_flag = True
-    #             elif slu_tags[j][0] == 'I':
-    #                 if sub_flag:
-    #                     continue
-    #                 else:
-    #                     masked_tokens.append(tok)
-    #                     masked_slu_tags.append(slu_tags[j])
-    #             else:
-    #                 masked_tokens.append(tok)
-    #                 masked_slu_tags.append(slu_tags[j])
-    #                 sub_flag = False
-    #     else:
-    #         masked_tokens = tokens
-    #         masked_slu_tags = slu_tags
-        
-    #     assert len(masked_tokens) == len(masked_slu_tags)
-    #     sub_batch.substitute(i, masked_tokens, masked_slu_tags)
-    
-    # TODO: entity mask.
-    # sub_batch = SubstitutionBatch(batch_data)
-    # dm_num_type = len(domain2slot[batch_data[0].domain]) - 1
-    # masked_type = slot2desp[domain2slot[batch_data[0].domain][1:][mask_p[1] % dm_num_type]]
-    # for i in range(bsz):
-    #     tokens, slu_tags = batch_data[i].tokens, batch_data[i].slu_tags
-        # # TODO: mask the whole entity.
-        # masked_tokens = []
-        # masked_tags = []
-        # if mode == 'train' and np.random.rand() < mask_p[0]:
-        #     for tok, lbl in zip(tokens, slu_tags):
-        #         if lbl[0] == 'B' and lbl[2:] == masked_type:
-        #             masked_tokens.append('[MASK]')
-        #             masked_tags.append(lbl)
-        #         else:
-        #             if lbl[0] == 'I' and lbl[2:] == masked_type:
-        #                 continue
-        #             else:
-        #                 masked_tokens.append(tok)
-        #                 masked_tags.append(lbl)
-        # else:
-        #     masked_tokens = tokens
-        #     masked_tags = slu_tags
-        # sub_batch.substitute(i, masked_tokens, masked_tags)
-
-    # TODO: mask entity
     token_max_len = max(len(inst.tokens) for inst in batch_data)
     token_seq_len = [len(inst.tokens) for inst in batch_data]
     
@@ -177,22 +110,10 @@ def batch_variable(batch_data, Vocab, tgt_dm, mask_p=(0., 0), mode='train'):
     slu_label = torch.zeros((bsz, token_max_len), dtype=torch.long)
     slu_bio_label = torch.zeros((bsz, token_max_len), dtype=torch.long)
     
-    # 0 is [PAD]
-    # dm_num_type = len(domain2slot[batch_data[0].domain]) - 1
-    # masked_type = slot2desp[domain2slot[batch_data[0].domain][1:][mask_p[1] % dm_num_type]]
     for i in range(bsz):
         # TODO: mask entity
         tokens, slu_tags = batch_data[i].tokens, batch_data[i].slu_tags
         pref_chars = [slot2desp[x] for x in domain2slot[batch_data[i].domain]]
-        
-        # TODO: entity_mask (for training only)
-        # if mode == 'train' and mask_p[0] > 0.:
-        #     # TODO: bernouli sampler
-        #     bernouli_mask = np.random.binomial(1, mask_p[0], len(tokens))
-        #     masked_tokens = ['[MASK]' if _label[0] != 'O' and _label[2:] == masked_type and bernouli_mask[i] == 1 else _tok for i, (_tok, _label) in enumerate(zip(tokens, slu_tags))]
-        #     # masked_tokens = ['[MASK]' if _label[0] != 'O' and np.random.rand() < mask_p else _tok for _tok, _label in zip(tokens, slu_tags)]
-        # else:
-        #     masked_tokens = tokens
         
         tokens_list.append(pref_chars + tokens)
         
@@ -216,11 +137,9 @@ def batch_variable(batch_data, Vocab, tgt_dm, mask_p=(0., 0), mode='train'):
         
     return Batch(bert_inputs=bert_inputs,
                  unseen_inputs=unseen_inputs,
-                 
                  bio_label=bio_label,
                  slu_label=slu_label,
                  slu_bio_label=slu_bio_label,
-                 
                  token_mask=token_mask)
 
 

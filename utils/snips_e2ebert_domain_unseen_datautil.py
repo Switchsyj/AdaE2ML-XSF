@@ -4,9 +4,6 @@ import torch
 import collections
 from collections import defaultdict
 import pickle
-import numpy as np
-import random
-import json
 
 
 domain_set = ["AddToPlaylist", "BookRestaurant", "GetWeather", 
@@ -46,20 +43,6 @@ domain2unseen = {
     "SearchCreativeWork": [],
     "SearchScreeningEvent": ['movie_type', 'object_location_type', 'location_name', 'movie_name']
 }
-
-# slot2desp = {'[PAD]': '[PAD]', 'playlist': 'playlist', 'music_item': 'music item', 'geographic_poi': 'geographic position', 
-#              'facility': 'facility', 'movie_name': 'movie name', 'location_name': 'location name', 
-#              'restaurant_name': 'restaurant name', 'track': 'track', 'restaurant_type': 'restaurant type', 
-#              'object_part_of_series_type': 'series', 'country': 'country', 'service': 'service', 
-#              'poi': 'position', 'party_size_description': 'person', 'served_dish': 'served dish', 
-#              'genre': 'genre', 'current_location': 'current location', 'object_select': 'this current', 
-#              'album': 'album', 'object_name': 'object name', 'state': 'location', 
-#              'sort': 'type', 'object_location_type': 'location type', 'movie_type': 'movie type', 
-#              'spatial_relation': 'spatial relation', 'artist': 'artist', 'cuisine': 'cuisine', 
-#              'entity_name': 'entity name', 'object_type': 'object type', 'playlist_owner': 'owner', 
-#              'timeRange': 'time range', 'city': 'city', 'rating_value': 'rating value', 
-#              'best_rating': 'best rating', 'rating_unit': 'rating unit', 'year': 'year', 
-#              'party_size_number': 'number', 'condition_description': 'weather', 'condition_temperature': 'temperature'}
 
 slot2desp = {'[PAD]': '[PAD]', 'playlist': 'playlist', 'music_item': 'music item', 'geographic_poi': 'geographic position', 
             'facility': 'facility', 'movie_name': 'movie name', 'location_name': 'location name', 
@@ -119,46 +102,8 @@ def create_vocab(all_data_sets, bert_path):
 
 
 def batch_variable(batch_data, Vocab, tgt_dm, mode='train'):
-    # assert slot2desp.keys() == slot_list
     bsz = len(batch_data)
     desp2slot = {v: k for k, v in slot2desp.items()}
-    
-    # TODO: random entity substitution
-    # with open(f'data/snips/{tgt_dm}/{tgt_dm}_ent4otherdm.json') as f:
-    #     type2entity = json.load(f)
-
-    # for i in range(bsz):
-    #     tokens, slu_tags = batch_data[i].tokens, batch_data[i].slu_tags
-    #     # # TODO: substitute the whole entity.
-    #     if mode == 'train' and mask_p[0] > 0.:
-    #         masked_tokens = []
-    #         masked_slu_tags = []
-    #         sub_flag = False
-    #         for j, tok in enumerate(tokens):
-    #             if slu_tags[j][0] == 'B' and np.random.rand() < mask_p[0]:
-    #                 random.shuffle(type2entity[desp2slot[slu_tags[j][2:]]])
-    #                 random_ent = type2entity[desp2slot[slu_tags[j][2:]]][0].split()
-    #                 masked_tokens.extend(random_ent)
-    #                 masked_slu_tags.append(slu_tags[j])
-    #                 masked_slu_tags.extend([f'I-{slu_tags[j][2:]}'] * (len(random_ent)-1))
-    #                 sub_flag = True
-    #             elif slu_tags[j][0] == 'I':
-    #                 if sub_flag:
-    #                     continue
-    #                 else:
-    #                     masked_tokens.append(tok)
-    #                     masked_slu_tags.append(slu_tags[j])
-    #             else:
-    #                 masked_tokens.append(tok)
-    #                 masked_slu_tags.append(slu_tags[j])
-    #                 sub_flag = False
-    #     else:
-    #         masked_tokens = tokens
-    #         masked_slu_tags = slu_tags
-        
-    #     assert len(masked_tokens) == len(masked_slu_tags)
-    #     batch_data[i].tokens = masked_tokens
-    #     batch_data[i].slu_tags = masked_slu_tags
     
     token_max_len = max(len(inst.tokens) for inst in batch_data)
     token_seq_len = [len(inst.tokens) for inst in batch_data]
@@ -168,34 +113,16 @@ def batch_variable(batch_data, Vocab, tgt_dm, mode='train'):
     slot_bio_vocab = Vocab['slot_bio']
     
     tokens_list = []
-    # pref_char_list = []
 
     token_mask = torch.zeros((bsz, token_max_len), dtype=torch.bool)
     bio_label = torch.zeros((bsz, token_max_len), dtype=torch.long)
     slu_label = torch.zeros((bsz, token_max_len), dtype=torch.long)
     slu_bio_label = torch.zeros((bsz, token_max_len), dtype=torch.long)
-    
-    # TODO: uttr_label CL
-    # cl_label = torch.zeros((bsz, token_max_len + len(domain2slot[batch_data[0].domain])), dtype=torch.long)
-    
-    # dm_num_type = len(domain2slot[batch_data[0].domain]) - 1
-    # masked_type = slot2desp[domain2slot[batch_data[0].domain][1:][mask_p[1] % dm_num_type]]
+ 
     for i in range(bsz):
         tokens, slu_tags = batch_data[i].tokens, batch_data[i].slu_tags 
         pref_chars = [slot2desp[x] for x in domain2slot[batch_data[i].domain]]
 
-        # TODO: entity token mask (for training only)
-        # if mode == 'train' and mask_p > 0.:
-        #     # TODO: bernouli sampler
-        #     bernouli_mask = np.random.binomial(1, mask_p, len(tokens))
-        #     # masked_tokens = ['[MASK]' if _label[0] != 'O' and _label[2:] == masked_type and bernouli_mask[i] == 1 else _tok for i, (_tok, _label) in enumerate(zip(tokens, slu_tags))]
-        #     masked_tokens = ['[ENT]' if _label[0] != 'O' and bernouli_mask[i] == 1 else _tok for i, (_tok, _label) in enumerate(zip(tokens, slu_tags))]
-        #     # masked_tokens = ['[MASK]' if _label[0] != 'O' and np.random.rand() < mask_p[1] else _tok for _tok, _label in zip(tokens, slu_tags)]
-        # else:
-        #     masked_tokens = tokens
-        
-        # tokens_list.append(['In', 'domain', f'{batch_data[i].domain}:'] + pref_chars + tokens)
-        # pref_char_list.append(pref_chars)
         tokens_list.append(pref_chars + tokens)
         
         token_mask[i, :token_seq_len[i]].fill_(1)
@@ -210,10 +137,6 @@ def batch_variable(batch_data, Vocab, tgt_dm, mode='train'):
         
         bio_label[i, :token_seq_len[i]] = torch.tensor([binary_vocab.inst2idx(x) for x in bio], dtype=torch.long)
         slu_label[i, :token_seq_len[i]] = torch.tensor([domain2slot[batch_data[i].domain].index(desp2slot[x]) for x in slu], dtype=torch.long)
-        # TODO: uttr+label CL
-        # cl_label[i, :len(domain2slot[batch_data[i].domain])] = torch.tensor([domain2slot[batch_data[i].domain].index(desp2slot[x]) for x in pref_chars], dtype=torch.long)
-        # cl_label[i, len(domain2slot[batch_data[i].domain]): token_seq_len[i]+len(domain2slot[batch_data[i].domain])] = torch.tensor([domain2slot[batch_data[i].domain].index(desp2slot[x]) for x in slu], dtype=torch.long)
-        
 
         slu_bio_label[i, :token_seq_len[i]] = torch.tensor([slot_bio_vocab.inst2idx(x) for x in slu_tags], dtype=torch.long)
     
@@ -223,7 +146,6 @@ def batch_variable(batch_data, Vocab, tgt_dm, mode='train'):
                  
                  bio_label=bio_label,
                  slu_label=slu_label,
-                #  cl_label=cl_label,
                  slu_bio_label=slu_bio_label,
                  
                  token_mask=token_mask)
