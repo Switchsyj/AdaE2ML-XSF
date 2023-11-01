@@ -67,8 +67,8 @@ Train our model for 50-shot adaptation to GetWeather domain:
 ## Cross-dataset setting
 To train and evaluate our model under the cross-dataset scenario (i.e. SNIPS <-> ATIS), you can use the following commands:
 ```shell
-python f2xDataset.py --cuda 0 -lr 1e-3 --src snips --tgt atis --alpha 1.5 --beta 1.0 --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.5 --model_ckpt snips-atis.ckpt --vocab_ckpt snips-atis_vocab.ckpt
-python f2xDataset.py --cuda 0 -lr 1e-4 --src atis --tgt snips --batch_size 8 --alpha 2.0 --beta 2.0 --epoch 30 --dropout 0.1 --cl --cl_type euclidean --cl_temperature 0.5 --model_ckpt snips-atis.ckpt --vocab_ckpt snips-atis_vocab.ckpt
+❱❱❱ python f2xDataset.py --cuda 0 -lr 1e-3 --src snips --tgt atis --alpha 1.5 --beta 1.0 --epoch 30 --dropout 0.1 --cl --cl_type cosine --cl_temperature 0.5 --model_ckpt snips-atis.ckpt --vocab_ckpt snips-atis_vocab.ckpt
+❱❱❱ python f2xDataset.py --cuda 0 -lr 1e-4 --src atis --tgt snips --batch_size 8 --alpha 2.0 --beta 2.0 --epoch 30 --dropout 0.1 --cl --cl_type euclidean --cl_temperature 0.5 --model_ckpt snips-atis.ckpt --vocab_ckpt snips-atis_vocab.ckpt
 ```
 
 ## Cross-domain NER
