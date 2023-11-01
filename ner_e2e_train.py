@@ -24,7 +24,8 @@ class Trainer(object):
         
         self.train_set = load_data('data/ner/conll2003/train.txt', 'conll2003')
         self.val_set = load_data('data/ner/conll2003/dev.txt', 'conll2003')
-        self.test_set = load_data('data/ner/tech/tech_test.txt', 'tech')
+        # self.test_set = load_data('data/ner/tech/tech_test.txt', 'tech')
+        self.test_set = load_data('data/ner/conll2003/dev.txt', 'conll2003')
         # few-shot setting
         if self.args.n_sample > 0:
             self.train_set.extend(self.test_set[:self.args.n_sample])
