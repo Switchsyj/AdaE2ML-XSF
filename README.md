@@ -86,12 +86,21 @@ Train our model without slot-level CL for zero-resource adaptation to sci-tech d
 # Citation
 If you use any source codes or ideas included in this repository for your work, please cite the following paper.
 ```
-@inproceedings{
-shi2023adaptive,
-title={Adaptive End-to-End Metric Learning for Zero-Shot Cross-Domain Slot Filling},
-author={Yuanjun Shi and Linzhi Wu and Minglai Shao},
-booktitle={The 2023 Conference on Empirical Methods in Natural Language Processing},
-year={2023},
-url={https://openreview.net/forum?id=csBtifBXKo}
+@inproceedings{shi-etal-2023-adaptive,
+    title = "Adaptive End-to-End Metric Learning for Zero-Shot Cross-Domain Slot Filling",
+    author = "Shi, Yuanjun  and
+      Wu, Linzhi  and
+      Shao, Minglai",
+    editor = "Bouamor, Houda  and
+      Pino, Juan  and
+      Bali, Kalika",
+    booktitle = "Proceedings of the 2023 Conference on Empirical Methods in Natural Language Processing",
+    month = dec,
+    year = "2023",
+    address = "Singapore",
+    publisher = "Association for Computational Linguistics",
+    url = "https://aclanthology.org/2023.emnlp-main.387",
+    doi = "10.18653/v1/2023.emnlp-main.387",
+    pages = "6291--6301"
 }
 ```
